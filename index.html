@@ -83,15 +83,57 @@
     const ctx = canvas.getContext("2d");
     const towersLayer = document.getElementById("towersLayer");
 
-    // dodaje animowany sprite (gif) wieży jako nakładkę pozycjonowaną w %
+    // klatka spoczynku = pierwsza klatka gifa przechwycona do PNG (bez dodatkowych plików)
+    const ATTACK_SRC = "tower.gif";
+    let IDLE_SRC = "tower.gif"; // fallback zanim przechwycimy klatkę
+    (function captureIdleFrame() {
+      const im = new Image();
+      im.onload = function () {
+        try {
+          const cc = document.createElement("canvas");
+          cc.width = im.naturalWidth; cc.height = im.naturalHeight;
+          cc.getContext("2d").drawImage(im, 0, 0);
+          IDLE_SRC = cc.toDataURL("image/png");
+          for (const t of towers) if (t.el && !t.attacking) t.el.src = IDLE_SRC;
+        } catch (e) { /* zostaje fallback */ }
+      };
+      im.src = "tower.gif";
+    })();
+
+    // dodaje sprite wieży jako nakładkę pozycjonowaną w % (startowo: klatka spoczynku)
     function addTowerSprite(t) {
       const img = document.createElement("img");
-      img.src = "tower.gif";
       img.alt = "Wieża";
       img.className = "tower-sprite";
       img.style.left = (t.x / W * 100) + "%";
       img.style.top = (t.y / H * 100) + "%";
+      img.style.transform = "translate(-50%,-58%) scaleX(1)";
+      img.src = IDLE_SRC;
       towersLayer.appendChild(img);
+      t.el = img; t.attacking = false; t.facing = 1;
+    }
+
+    // animacja tylko gdy wieża ma cel w zasięgu + obrót (odbicie) w jego stronę
+    function updateTowerSprites() {
+      for (const t of towers) {
+        if (!t.el) continue;
+        let target = null, best = Infinity;
+        for (const e of enemies) {
+          const d = Math.hypot(e.x - t.x, e.y - t.y);
+          if (d <= TOWER_RANGE && d < best) { best = d; target = e; }
+        }
+        const attacking = !!target;
+        const facing = target ? (target.x < t.x ? -1 : 1) : t.facing;
+        if (attacking !== t.attacking) {
+          t.attacking = attacking;
+          t.el.src = attacking ? ATTACK_SRC : IDLE_SRC;
+        }
+        if (facing !== t.facing || attacking !== t.el._af) {
+          t.facing = facing;
+          t.el.style.transform = "translate(-50%,-58%) scaleX(" + facing + ")";
+        }
+        t.el._af = attacking;
+      }
     }
     const dpr = window.devicePixelRatio || 1;
     canvas.width = W * dpr; canvas.height = H * dpr;
@@ -285,6 +327,7 @@
       const dt = Math.min(0.05, (ts - last) / 1000 || 0);
       last = ts;
       update(dt);
+      updateTowerSprites();
       draw();
       requestAnimationFrame(loop);
     }
