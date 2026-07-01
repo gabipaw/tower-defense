@@ -107,10 +107,10 @@
       img.className = "tower-sprite";
       img.style.left = (t.x / W * 100) + "%";
       img.style.top = (t.y / H * 100) + "%";
-      img.style.transform = "translate(-50%,-58%) rotate(0deg)";
+      img.style.transform = "translate(-50%,-58%) rotate(0deg) scaleY(1)";
       img.src = IDLE_SRC;
       towersLayer.appendChild(img);
-      t.el = img; t.attacking = false; t.angle = 0;
+      t.el = img; t.attacking = false; t.angle = 0; t.flip = 1;
     }
 
     // domyślny kierunek gifa (0 = patrzy w prawo); zmień, jeśli sprite celuje inaczej
@@ -131,10 +131,13 @@
           t.el.src = attacking ? ATTACK_SRC : IDLE_SRC;
         }
         if (target) {
-          const deg = Math.atan2(target.y - t.y, target.x - t.x) * 180 / Math.PI + SPRITE_FACING_OFFSET_DEG;
-          if (Math.abs(deg - t.angle) > 0.5) {
-            t.angle = deg;
-            t.el.style.transform = "translate(-50%,-58%) rotate(" + deg + "deg)";
+          const rad = Math.atan2(target.y - t.y, target.x - t.x);
+          const deg = rad * 180 / Math.PI + SPRITE_FACING_OFFSET_DEG;
+          // gdy wróg po lewej — lustrzane odbicie w pionie, żeby wieża nie stała na głowie
+          const flip = Math.cos(rad) < 0 ? -1 : 1;
+          if (Math.abs(deg - t.angle) > 0.5 || flip !== t.flip) {
+            t.angle = deg; t.flip = flip;
+            t.el.style.transform = "translate(-50%,-58%) rotate(" + deg + "deg) scaleY(" + flip + ")";
           }
         }
       }
