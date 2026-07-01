@@ -29,9 +29,12 @@
     }
     .towers-layer { position:absolute; inset:0; pointer-events:none; }
     .tower-sprite {
-      position:absolute; height:24%; width:auto; transform:translate(-50%,-58%);
+      position:absolute; width:auto; transform:translate(-50%,-58%);
       image-rendering:auto; filter:drop-shadow(0 4px 4px rgba(0,0,0,0.35));
     }
+    /* wysokości dobrane tak, by POSTAĆ miała podobny rozmiar w obu gifach */
+    .tower-sprite.sprite-idle   { height:25%; }
+    .tower-sprite.sprite-attack { height:22%; }
     .controls { display:flex; gap:0.6rem; flex-wrap:wrap; justify-content:center; }
     button.btn {
       padding:0.65rem 1.2rem; font-size:0.95rem; font-weight:700; color:#fff; border:none;
@@ -84,32 +87,28 @@
     const towersLayer = document.getElementById("towersLayer");
 
     // źródła klatek Jotaro
-    const SPAWN_SRC = "spawn_once.gif";       // animacja spawnu (gra raz)
-    const SPAWN_LAST_SRC = "spawn_last.png";  // zamrożona ostatnia klatka spawnu (spoczynek)
-    const ATTACK_SRC = "tower.gif";           // animacja ataku (w pętli)
-    const SPAWN_SECONDS = 3.6;                // długość animacji spawnu
-    const SPRITE_FACING_OFFSET_DEG = 0;       // 0 = gif ataku patrzy w prawo
+    const IDLE_SRC = "spawn.gif";       // animacja spoczynku — zapętlona
+    const ATTACK_SRC = "tower.gif";     // animacja ataku — zapętlona
+    const SPRITE_FACING_OFFSET_DEG = 0; // 0 = gif ataku patrzy w prawo
     const UP = "translate(-50%,-58%) rotate(0deg) scaleY(1)";
 
-    // dodaje sprite wieży: startuje animacją spawnu
+    // dodaje sprite wieży: startuje zapętloną animacją spoczynku
     function addTowerSprite(t) {
       const img = document.createElement("img");
       img.alt = "Wieża";
-      img.className = "tower-sprite";
+      img.className = "tower-sprite sprite-idle";
       img.style.left = (t.x / W * 100) + "%";
       img.style.top = (t.y / H * 100) + "%";
       img.style.transform = UP;
-      img.src = SPAWN_SRC;
+      img.src = IDLE_SRC;
       towersLayer.appendChild(img);
-      t.el = img; t.phase = "spawn"; t.spawnLeft = SPAWN_SECONDS; t.angle = 0; t.flip = 1;
+      t.el = img; t.phase = "idle"; t.angle = 0; t.flip = 1;
     }
 
-    // stany: spawn (raz) → idle (zamrożona ostatnia klatka); atak gdy wróg w zasięgu
-    function updateTowerSprites(dt) {
+    // stany: idle (zapętlone) ↔ atak (gdy wróg w zasięgu, obrót/mirror ku celowi)
+    function updateTowerSprites() {
       for (const t of towers) {
         if (!t.el) continue;
-        if (t.spawnLeft > 0) t.spawnLeft = Math.max(0, t.spawnLeft - dt);
-
         let target = null, best = Infinity;
         for (const e of enemies) {
           const d = Math.hypot(e.x - t.x, e.y - t.y);
@@ -117,7 +116,10 @@
         }
 
         if (target) {
-          if (t.phase !== "attack") { t.phase = "attack"; t.el.src = ATTACK_SRC; }
+          if (t.phase !== "attack") {
+            t.phase = "attack"; t.el.src = ATTACK_SRC;
+            t.el.className = "tower-sprite sprite-attack";
+          }
           const rad = Math.atan2(target.y - t.y, target.x - t.x);
           const deg = rad * 180 / Math.PI + SPRITE_FACING_OFFSET_DEG;
           const flip = Math.cos(rad) < 0 ? -1 : 1; // wróg po lewej → odbicie w pionie
@@ -125,10 +127,10 @@
             t.angle = deg; t.flip = flip;
             t.el.style.transform = "translate(-50%,-58%) rotate(" + deg + "deg) scaleY(" + flip + ")";
           }
-        } else if (t.phase === "attack" || (t.phase === "spawn" && t.spawnLeft === 0)) {
-          // brak celu: po ataku lub po zakończeniu spawnu → zamrożona ostatnia klatka
-          t.phase = "idle"; t.el.src = SPAWN_LAST_SRC; t.angle = 0; t.flip = 1;
-          t.el.style.transform = UP;
+        } else if (t.phase !== "idle") {
+          t.phase = "idle"; t.el.src = IDLE_SRC;
+          t.el.className = "tower-sprite sprite-idle";
+          t.angle = 0; t.flip = 1; t.el.style.transform = UP;
         }
       }
     }
@@ -324,7 +326,7 @@
       const dt = Math.min(0.05, (ts - last) / 1000 || 0);
       last = ts;
       update(dt);
-      updateTowerSprites(dt);
+      updateTowerSprites();
       draw();
       requestAnimationFrame(loop);
     }
