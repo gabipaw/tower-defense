@@ -29,7 +29,7 @@
     }
     .towers-layer { position:absolute; inset:0; pointer-events:none; }
     .tower-sprite {
-      position:absolute; width:16%; height:auto; transform:translate(-50%,-58%);
+      position:absolute; height:24%; width:auto; transform:translate(-50%,-58%);
       image-rendering:auto; filter:drop-shadow(0 4px 4px rgba(0,0,0,0.35));
     }
     .controls { display:flex; gap:0.6rem; flex-wrap:wrap; justify-content:center; }
@@ -83,62 +83,52 @@
     const ctx = canvas.getContext("2d");
     const towersLayer = document.getElementById("towersLayer");
 
-    // klatka spoczynku = pierwsza klatka gifa przechwycona do PNG (bez dodatkowych plików)
-    const ATTACK_SRC = "tower.gif";
-    let IDLE_SRC = "tower.gif"; // fallback zanim przechwycimy klatkę
-    (function captureIdleFrame() {
-      const im = new Image();
-      im.onload = function () {
-        try {
-          const cc = document.createElement("canvas");
-          cc.width = im.naturalWidth; cc.height = im.naturalHeight;
-          cc.getContext("2d").drawImage(im, 0, 0);
-          IDLE_SRC = cc.toDataURL("image/png");
-          for (const t of towers) if (t.el && !t.attacking) t.el.src = IDLE_SRC;
-        } catch (e) { /* zostaje fallback */ }
-      };
-      im.src = "tower.gif";
-    })();
+    // źródła klatek Jotaro
+    const SPAWN_SRC = "spawn_once.gif";       // animacja spawnu (gra raz)
+    const SPAWN_LAST_SRC = "spawn_last.png";  // zamrożona ostatnia klatka spawnu (spoczynek)
+    const ATTACK_SRC = "tower.gif";           // animacja ataku (w pętli)
+    const SPAWN_SECONDS = 3.6;                // długość animacji spawnu
+    const SPRITE_FACING_OFFSET_DEG = 0;       // 0 = gif ataku patrzy w prawo
+    const UP = "translate(-50%,-58%) rotate(0deg) scaleY(1)";
 
-    // dodaje sprite wieży jako nakładkę pozycjonowaną w % (startowo: klatka spoczynku)
+    // dodaje sprite wieży: startuje animacją spawnu
     function addTowerSprite(t) {
       const img = document.createElement("img");
       img.alt = "Wieża";
       img.className = "tower-sprite";
       img.style.left = (t.x / W * 100) + "%";
       img.style.top = (t.y / H * 100) + "%";
-      img.style.transform = "translate(-50%,-58%) rotate(0deg) scaleY(1)";
-      img.src = IDLE_SRC;
+      img.style.transform = UP;
+      img.src = SPAWN_SRC;
       towersLayer.appendChild(img);
-      t.el = img; t.attacking = false; t.angle = 0; t.flip = 1;
+      t.el = img; t.phase = "spawn"; t.spawnLeft = SPAWN_SECONDS; t.angle = 0; t.flip = 1;
     }
 
-    // domyślny kierunek gifa (0 = patrzy w prawo); zmień, jeśli sprite celuje inaczej
-    const SPRITE_FACING_OFFSET_DEG = 0;
-
-    // animacja tylko gdy wieża ma cel w zasięgu + pełny obrót (360°) ku wrogowi
-    function updateTowerSprites() {
+    // stany: spawn (raz) → idle (zamrożona ostatnia klatka); atak gdy wróg w zasięgu
+    function updateTowerSprites(dt) {
       for (const t of towers) {
         if (!t.el) continue;
+        if (t.spawnLeft > 0) t.spawnLeft = Math.max(0, t.spawnLeft - dt);
+
         let target = null, best = Infinity;
         for (const e of enemies) {
           const d = Math.hypot(e.x - t.x, e.y - t.y);
           if (d <= TOWER_RANGE && d < best) { best = d; target = e; }
         }
-        const attacking = !!target;
-        if (attacking !== t.attacking) {
-          t.attacking = attacking;
-          t.el.src = attacking ? ATTACK_SRC : IDLE_SRC;
-        }
+
         if (target) {
+          if (t.phase !== "attack") { t.phase = "attack"; t.el.src = ATTACK_SRC; }
           const rad = Math.atan2(target.y - t.y, target.x - t.x);
           const deg = rad * 180 / Math.PI + SPRITE_FACING_OFFSET_DEG;
-          // gdy wróg po lewej — lustrzane odbicie w pionie, żeby wieża nie stała na głowie
-          const flip = Math.cos(rad) < 0 ? -1 : 1;
+          const flip = Math.cos(rad) < 0 ? -1 : 1; // wróg po lewej → odbicie w pionie
           if (Math.abs(deg - t.angle) > 0.5 || flip !== t.flip) {
             t.angle = deg; t.flip = flip;
             t.el.style.transform = "translate(-50%,-58%) rotate(" + deg + "deg) scaleY(" + flip + ")";
           }
+        } else if (t.phase === "attack" || (t.phase === "spawn" && t.spawnLeft === 0)) {
+          // brak celu: po ataku lub po zakończeniu spawnu → zamrożona ostatnia klatka
+          t.phase = "idle"; t.el.src = SPAWN_LAST_SRC; t.angle = 0; t.flip = 1;
+          t.el.style.transform = UP;
         }
       }
     }
@@ -334,7 +324,7 @@
       const dt = Math.min(0.05, (ts - last) / 1000 || 0);
       last = ts;
       update(dt);
-      updateTowerSprites();
+      updateTowerSprites(dt);
       draw();
       requestAnimationFrame(loop);
     }
