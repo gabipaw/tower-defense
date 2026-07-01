@@ -32,9 +32,9 @@
       position:absolute; width:auto; transform:translate(-50%,-58%);
       image-rendering:auto; filter:drop-shadow(0 4px 4px rgba(0,0,0,0.35));
     }
-    /* wysokości dobrane tak, by POSTAĆ miała podobny rozmiar w obu gifach */
-    .tower-sprite.sprite-idle   { height:20%; }
-    .tower-sprite.sprite-attack { height:18%; }
+    /* idle mieści się w jednym kaflu (~1/8 wysokości); atak nieco większy = wrażenie zbliżenia */
+    .tower-sprite.sprite-idle   { height:13%; }
+    .tower-sprite.sprite-attack { height:15%; }
     .controls { display:flex; gap:0.6rem; flex-wrap:wrap; justify-content:center; }
     button.btn {
       padding:0.65rem 1.2rem; font-size:0.95rem; font-weight:700; color:#fff; border:none;
@@ -91,6 +91,7 @@
     const ATTACK_SRC = "tower.gif";     // animacja ataku — zapętlona
     const SPRITE_FACING_OFFSET_DEG = 0; // 0 = gif ataku patrzy w prawo
     const UP = "translate(-50%,-58%) rotate(0deg) scaleY(1)";
+    const TOWER_LUNGE = 0.5 * TILE;     // o ile wieża „dosuwa się" do wroga podczas ataku (melee)
 
     // dodaje sprite wieży: startuje zapętloną animacją spoczynku
     function addTowerSprite(t) {
@@ -116,21 +117,30 @@
         }
 
         if (target) {
-          if (t.phase !== "attack") {
-            t.phase = "attack"; t.el.src = ATTACK_SRC;
-            t.el.className = "tower-sprite sprite-attack";
-          }
           const rad = Math.atan2(target.y - t.y, target.x - t.x);
           const deg = rad * 180 / Math.PI + SPRITE_FACING_OFFSET_DEG;
           const flip = Math.cos(rad) < 0 ? -1 : 1; // wróg po lewej → odbicie w pionie
-          if (Math.abs(deg - t.angle) > 0.5 || flip !== t.flip) {
+          // doskok w stronę wroga, ale nie dalej niż do celu (cios kontaktowy)
+          const reach = Math.min(TOWER_LUNGE, best);
+          const lx = t.x + Math.cos(rad) * reach, ly = t.y + Math.sin(rad) * reach;
+          if (t.phase !== "attack") {
+            t.phase = "attack"; t.el.src = ATTACK_SRC;
+            t.el.className = "tower-sprite sprite-attack";
+            t.angle = null; // wymuś aktualizację pozycji/obrotu przy wejściu w atak
+          }
+          if (t.angle === null || Math.abs(deg - t.angle) > 0.5 || flip !== t.flip) {
             t.angle = deg; t.flip = flip;
+            t.el.style.left = (lx / W * 100) + "%";
+            t.el.style.top = (ly / H * 100) + "%";
             t.el.style.transform = "translate(-50%,-58%) rotate(" + deg + "deg) scaleY(" + flip + ")";
           }
         } else if (t.phase !== "idle") {
           t.phase = "idle"; t.el.src = IDLE_SRC;
           t.el.className = "tower-sprite sprite-idle";
-          t.angle = 0; t.flip = 1; t.el.style.transform = UP;
+          t.angle = 0; t.flip = 1;
+          t.el.style.left = (t.x / W * 100) + "%";  // powrót na środek kafla
+          t.el.style.top = (t.y / H * 100) + "%";
+          t.el.style.transform = UP;
         }
       }
     }
