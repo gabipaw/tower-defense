@@ -22,9 +22,15 @@
     .hud .item { display:flex; align-items:center; gap:0.35rem; }
     .hud .muted { color:var(--muted); font-weight:600; }
     .wrapc { width:min(96vw,800px); }
+    .stage { position:relative; width:100%; }
     canvas {
       width:100%; height:auto; display:block; border-radius:1rem;
       box-shadow:0 20px 45px -20px rgba(79,70,229,0.55); background:#dcfce7; touch-action:manipulation;
+    }
+    .towers-layer { position:absolute; inset:0; pointer-events:none; }
+    .tower-sprite {
+      position:absolute; width:13%; height:auto; transform:translate(-50%,-58%);
+      image-rendering:auto; filter:drop-shadow(0 4px 4px rgba(0,0,0,0.35));
     }
     .controls { display:flex; gap:0.6rem; flex-wrap:wrap; justify-content:center; }
     button.btn {
@@ -50,7 +56,12 @@
     <div class="item muted" id="phase" data-testid="phase">—</div>
   </div>
 
-  <div class="wrapc"><canvas id="game" data-testid="canvas"></canvas></div>
+  <div class="wrapc">
+    <div class="stage" id="stage">
+      <canvas id="game" data-testid="canvas"></canvas>
+      <div class="towers-layer" id="towersLayer"></div>
+    </div>
+  </div>
 
   <div class="banner" id="banner" data-testid="banner"></div>
 
@@ -70,6 +81,18 @@
 
     const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
+    const towersLayer = document.getElementById("towersLayer");
+
+    // dodaje animowany sprite (gif) wieży jako nakładkę pozycjonowaną w %
+    function addTowerSprite(t) {
+      const img = document.createElement("img");
+      img.src = "tower.gif";
+      img.alt = "Wieża";
+      img.className = "tower-sprite";
+      img.style.left = (t.x / W * 100) + "%";
+      img.style.top = (t.y / H * 100) + "%";
+      towersLayer.appendChild(img);
+    }
     const dpr = window.devicePixelRatio || 1;
     canvas.width = W * dpr; canvas.height = H * dpr;
     canvas.style.aspectRatio = W + " / " + H;
@@ -100,6 +123,7 @@
     function reset() {
       money = 120; lives = 15; wave = 0; phase = "idle";
       enemies = []; towers = []; projectiles = []; toSpawn = 0; spawnTimer = 0; hover = null;
+      towersLayer.innerHTML = "";
       setBanner("");
       syncHud();
     }
@@ -147,7 +171,9 @@
       if (!canBuild(c, r)) return false;
       if (money < TOWER_COST) return false;
       const p = center(c, r);
-      towers.push({ c, r, x: p.x, y: p.y, cd: 0 });
+      const t = { c, r, x: p.x, y: p.y, cd: 0 };
+      towers.push(t);
+      addTowerSprite(t);
       money -= TOWER_COST;
       syncHud();
       return true;
@@ -235,12 +261,10 @@
         ctx.fillStyle = "rgba(79,70,229,0.35)";
         ctx.fillRect(hover.c * TILE + 10, hover.r * TILE + 10, TILE - 20, TILE - 20);
       }
-      // wieże
+      // wieże: na canvasie tylko podstawka; sam sprite (gif) jest nakładką <img>
       for (const t of towers) {
-        ctx.fillStyle = "#3730a3";
-        ctx.fillRect(t.x - 18, t.y - 18, 36, 36);
-        ctx.fillStyle = "#a5b4fc";
-        ctx.fillRect(t.x - 6, t.y - 22, 12, 12);
+        ctx.fillStyle = "rgba(55,48,163,0.25)";
+        ctx.beginPath(); ctx.ellipse(t.x, t.y + 12, 22, 9, 0, 0, Math.PI * 2); ctx.fill();
       }
       // pociski
       ctx.fillStyle = "#1e293b";
