@@ -202,7 +202,7 @@
     }
 
     function spawnEnemy() {
-      const hp = 40 + wave * 22;
+      const hp = 4 + (wave - 1) * 2; // fala 1 = 4 HP → ~2 s pod ostrzałem jednej wieży (2 dmg/s)
       enemies.push({
         x: pathPx[0].x, y: pathPx[0].y, wp: 1,
         speed: 55 + wave * 4, hp: hp, maxHp: hp, alive: true,
