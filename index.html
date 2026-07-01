@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#4f46e5" />
+  <title>Tower Defense — Gabriel Pawłowski</title>
+  <style>
+    :root { --brand:#4f46e5; --brand-dark:#3730a3; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; }
+    * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+    body {
+      min-height:100dvh; display:flex; flex-direction:column; align-items:center; gap:0.75rem;
+      padding:1rem; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink);
+      background:linear-gradient(135deg,#eef2ff 0%,#f8fafc 50%,#ecfeff 100%); touch-action:manipulation;
+    }
+    h1 { font-size:clamp(1.2rem,4.5vw,1.7rem); letter-spacing:-0.01em; text-align:center; }
+    .hud {
+      display:flex; flex-wrap:wrap; gap:0.5rem 1rem; justify-content:center; align-items:center;
+      background:#fff; border:1px solid var(--line); border-radius:0.9rem; padding:0.6rem 1rem;
+      box-shadow:0 12px 30px -20px rgba(79,70,229,0.4); font-weight:700; font-size:0.95rem;
+    }
+    .hud .item { display:flex; align-items:center; gap:0.35rem; }
+    .hud .muted { color:var(--muted); font-weight:600; }
+    .wrapc { width:min(96vw,800px); }
+    canvas {
+      width:100%; height:auto; display:block; border-radius:1rem;
+      box-shadow:0 20px 45px -20px rgba(79,70,229,0.55); background:#dcfce7; touch-action:manipulation;
+    }
+    .controls { display:flex; gap:0.6rem; flex-wrap:wrap; justify-content:center; }
+    button.btn {
+      padding:0.65rem 1.2rem; font-size:0.95rem; font-weight:700; color:#fff; border:none;
+      border-radius:0.75rem; cursor:pointer; background:linear-gradient(135deg,var(--brand),var(--brand-dark));
+    }
+    button.btn.secondary { color:var(--brand-dark); background:#eef2ff; }
+    button.btn:disabled { opacity:0.5; cursor:not-allowed; }
+    .hint { color:var(--muted); font-size:0.85rem; text-align:center; max-width:40rem; }
+    .banner {
+      font-size:1.1rem; font-weight:800; text-align:center; min-height:1.5rem;
+    }
+    .banner.win { color:#16a34a; } .banner.lose { color:#dc2626; }
+  </style>
+</head>
+<body>
+  <h1>🏰 Tower Defense</h1>
+
+  <div class="hud">
+    <div class="item">💰 <span data-testid="money" id="money">0</span></div>
+    <div class="item">❤️ <span data-testid="lives" id="lives">0</span></div>
+    <div class="item">🌊 Fala <span data-testid="wave" id="wave">0</span><span class="muted">/<span id="maxwave">0</span></span></div>
+    <div class="item muted" id="phase" data-testid="phase">—</div>
+  </div>
+
+  <div class="wrapc"><canvas id="game" data-testid="canvas"></canvas></div>
+
+  <div class="banner" id="banner" data-testid="banner"></div>
+
+  <div class="controls">
+    <button class="btn" id="start" data-testid="start">▶️ Start fali</button>
+    <button class="btn secondary" id="reset" data-testid="reset">🔄 Nowa gra</button>
+  </div>
+  <p class="hint">Kliknij / dotknij wolne pole (trawa), aby postawić wieżę (koszt 50 💰). Wieże strzelają do wrogów w zasięgu. Nie wpuść ich na koniec ścieżki!</p>
+
+  <script>
+  (function () {
+    const COLS = 12, ROWS = 8, TILE = 64;
+    const W = COLS * TILE, H = ROWS * TILE;
+    const MAX_WAVES = 8;
+    const TOWER_COST = 50, TOWER_RANGE = 1.8 * TILE, TOWER_DMG = 22, TOWER_RATE = 2.2;
+    const KILL_REWARD = 12;
+
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.aspectRatio = W + " / " + H;
+    ctx.scale(dpr, dpr);
+
+    // ścieżka (współrzędne kafli); końce poza planszą
+    const WAYPOINTS = [
+      { c: -1, r: 1 }, { c: 2, r: 1 }, { c: 2, r: 5 }, { c: 6, r: 5 },
+      { c: 6, r: 2 }, { c: 9, r: 2 }, { c: 9, r: 6 }, { c: 12, r: 6 },
+    ];
+    const center = (c, r) => ({ x: c * TILE + TILE / 2, y: r * TILE + TILE / 2 });
+    const pathPx = WAYPOINTS.map((w) => center(w.c, w.r));
+
+    // zbiór kafli zajętych przez ścieżkę (nie można budować)
+    const pathTiles = new Set();
+    for (let i = 0; i < WAYPOINTS.length - 1; i++) {
+      let a = WAYPOINTS[i], b = WAYPOINTS[i + 1];
+      const dc = Math.sign(b.c - a.c), dr = Math.sign(b.r - a.r);
+      let c = a.c, r = a.r;
+      pathTiles.add(c + "," + r);
+      while (c !== b.c || r !== b.r) { c += dc; r += dr; pathTiles.add(c + "," + r); }
+    }
+    const key = (c, r) => c + "," + r;
+    const inBounds = (c, r) => c >= 0 && c < COLS && r >= 0 && r < ROWS;
+
+    let money, lives, wave, phase, enemies, towers, projectiles, toSpawn, spawnTimer, hover;
+
+    function reset() {
+      money = 120; lives = 15; wave = 0; phase = "idle";
+      enemies = []; towers = []; projectiles = []; toSpawn = 0; spawnTimer = 0; hover = null;
+      setBanner("");
+      syncHud();
+    }
+
+    function setBanner(text, cls) {
+      const b = document.getElementById("banner");
+      b.textContent = text; b.className = "banner" + (cls ? " " + cls : "");
+    }
+    function syncHud() {
+      document.getElementById("money").textContent = money;
+      document.getElementById("lives").textContent = lives;
+      document.getElementById("wave").textContent = wave;
+      document.getElementById("maxwave").textContent = MAX_WAVES;
+      const names = { idle: "Gotowy", active: "Fala trwa…", win: "Wygrana!", lose: "Przegrana" };
+      document.getElementById("phase").textContent = names[phase] || "—";
+      document.getElementById("start").disabled = phase !== "idle";
+    }
+
+    function startWave() {
+      if (phase !== "idle") return;
+      wave += 1;
+      toSpawn = 4 + wave * 2;
+      spawnTimer = 0;
+      phase = "active";
+      setBanner("");
+      syncHud();
+    }
+
+    function spawnEnemy() {
+      const hp = 40 + wave * 22;
+      enemies.push({
+        x: pathPx[0].x, y: pathPx[0].y, wp: 1,
+        speed: 55 + wave * 4, hp: hp, maxHp: hp, alive: true,
+      });
+    }
+
+    function canBuild(c, r) {
+      if (!inBounds(c, r)) return false;
+      if (pathTiles.has(key(c, r))) return false;
+      return !towers.some((t) => t.c === c && t.r === r);
+    }
+
+    function tryPlace(c, r) {
+      if (phase === "win" || phase === "lose") return false;
+      if (!canBuild(c, r)) return false;
+      if (money < TOWER_COST) return false;
+      const p = center(c, r);
+      towers.push({ c, r, x: p.x, y: p.y, cd: 0 });
+      money -= TOWER_COST;
+      syncHud();
+      return true;
+    }
+
+    // ---- pętla gry ----
+    function update(dt) {
+      if (phase !== "active") return;
+
+      // spawn
+      if (toSpawn > 0) {
+        spawnTimer -= dt;
+        if (spawnTimer <= 0) { spawnEnemy(); toSpawn -= 1; spawnTimer = 0.75; }
+      }
+
+      // wrogowie
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const wp = pathPx[e.wp];
+        if (!wp) { e.alive = false; e.leaked = true; continue; }
+        const dx = wp.x - e.x, dy = wp.y - e.y;
+        const d = Math.hypot(dx, dy);
+        const step = e.speed * dt;
+        if (step >= d) { e.x = wp.x; e.y = wp.y; e.wp += 1; }
+        else { e.x += (dx / d) * step; e.y += (dy / d) * step; }
+      }
+      // leaki
+      for (const e of enemies) {
+        if (e.leaked) { lives -= 1; e.counted = true; }
+      }
+      if (enemies.some((e) => e.leaked)) syncHud();
+      enemies = enemies.filter((e) => e.alive && !e.leaked);
+
+      // wieże strzelają
+      for (const t of towers) {
+        t.cd -= dt;
+        if (t.cd > 0) continue;
+        let target = null, best = Infinity;
+        for (const e of enemies) {
+          const d = Math.hypot(e.x - t.x, e.y - t.y);
+          if (d <= TOWER_RANGE && d < best) { best = d; target = e; }
+        }
+        if (target) { projectiles.push({ x: t.x, y: t.y, target, speed: 420 }); t.cd = 1 / TOWER_RATE; }
+      }
+
+      // pociski
+      for (const p of projectiles) {
+        if (!p.target || !p.target.alive) { p.dead = true; continue; }
+        const dx = p.target.x - p.x, dy = p.target.y - p.y;
+        const d = Math.hypot(dx, dy), step = p.speed * dt;
+        if (step >= d) {
+          p.x = p.target.x; p.y = p.target.y; p.dead = true;
+          p.target.hp -= TOWER_DMG;
+          if (p.target.hp <= 0 && p.target.alive) { p.target.alive = false; money += KILL_REWARD; }
+        } else { p.x += (dx / d) * step; p.y += (dy / d) * step; }
+      }
+      projectiles = projectiles.filter((p) => !p.dead);
+      enemies = enemies.filter((e) => e.alive);
+      syncHud();
+
+      // koniec fali / gry
+      if (lives <= 0) { phase = "lose"; setBanner("Przegrana! Wrogowie przedarli się 💀", "lose"); syncHud(); return; }
+      if (toSpawn === 0 && enemies.length === 0) {
+        if (wave >= MAX_WAVES) { phase = "win"; setBanner("Wygrana! Obroniłeś wszystkie fale 🎉", "win"); }
+        else { phase = "idle"; setBanner("Fala " + wave + " odparta! Kliknij „Start fali”."); }
+        syncHud();
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      // kafle
+      for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+        const isPath = pathTiles.has(key(c, r));
+        ctx.fillStyle = isPath ? "#c9a26b" : (((c + r) % 2) ? "#bbf7d0" : "#c7f9d5");
+        ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
+        ctx.strokeStyle = "rgba(0,0,0,0.05)";
+        ctx.strokeRect(c * TILE, r * TILE, TILE, TILE);
+      }
+      // podgląd budowy
+      if (hover && canBuild(hover.c, hover.r) && money >= TOWER_COST && phase !== "win" && phase !== "lose") {
+        const p = center(hover.c, hover.r);
+        ctx.fillStyle = "rgba(79,70,229,0.15)";
+        ctx.beginPath(); ctx.arc(p.x, p.y, TOWER_RANGE, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "rgba(79,70,229,0.35)";
+        ctx.fillRect(hover.c * TILE + 10, hover.r * TILE + 10, TILE - 20, TILE - 20);
+      }
+      // wieże
+      for (const t of towers) {
+        ctx.fillStyle = "#3730a3";
+        ctx.fillRect(t.x - 18, t.y - 18, 36, 36);
+        ctx.fillStyle = "#a5b4fc";
+        ctx.fillRect(t.x - 6, t.y - 22, 12, 12);
+      }
+      // pociski
+      ctx.fillStyle = "#1e293b";
+      for (const p of projectiles) { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); }
+      // wrogowie
+      for (const e of enemies) {
+        ctx.fillStyle = "#ef4444";
+        ctx.beginPath(); ctx.arc(e.x, e.y, 14, 0, Math.PI * 2); ctx.fill();
+        // pasek HP
+        const w = 30, h = 5, x = e.x - w / 2, y = e.y - 24;
+        ctx.fillStyle = "#00000030"; ctx.fillRect(x, y, w, h);
+        ctx.fillStyle = "#22c55e"; ctx.fillRect(x, y, w * Math.max(0, e.hp / e.maxHp), h);
+      }
+    }
+
+    let last = 0;
+    function loop(ts) {
+      const dt = Math.min(0.05, (ts - last) / 1000 || 0);
+      last = ts;
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    // ---- wejście (mysz + dotyk) ----
+    function toTile(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      const x = (clientX - rect.left) / rect.width * W;
+      const y = (clientY - rect.top) / rect.height * H;
+      return { c: Math.floor(x / TILE), r: Math.floor(y / TILE) };
+    }
+    canvas.addEventListener("click", (e) => { const t = toTile(e.clientX, e.clientY); tryPlace(t.c, t.r); });
+    canvas.addEventListener("mousemove", (e) => { hover = toTile(e.clientX, e.clientY); });
+    canvas.addEventListener("mouseleave", () => { hover = null; });
+
+    document.getElementById("start").addEventListener("click", startWave);
+    document.getElementById("reset").addEventListener("click", reset);
+
+    // hook testowy / debug
+    window.TD = {
+      startWave, tryPlace, reset,
+      state: () => ({ money, lives, wave, phase, enemies: enemies.length, towers: towers.length, toSpawn }),
+    };
+
+    reset();
+    requestAnimationFrame(loop);
+  })();
+  </script>
+</body>
+</html>
