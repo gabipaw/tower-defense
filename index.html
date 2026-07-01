@@ -29,7 +29,7 @@
     }
     .towers-layer { position:absolute; inset:0; pointer-events:none; }
     .tower-sprite {
-      position:absolute; width:13%; height:auto; transform:translate(-50%,-58%);
+      position:absolute; width:16%; height:auto; transform:translate(-50%,-58%);
       image-rendering:auto; filter:drop-shadow(0 4px 4px rgba(0,0,0,0.35));
     }
     .controls { display:flex; gap:0.6rem; flex-wrap:wrap; justify-content:center; }
@@ -76,7 +76,7 @@
     const COLS = 12, ROWS = 8, TILE = 64;
     const W = COLS * TILE, H = ROWS * TILE;
     const MAX_WAVES = 8;
-    const TOWER_COST = 50, TOWER_RANGE = 1.8 * TILE, TOWER_DMG = 22, TOWER_RATE = 2.2;
+    const TOWER_COST = 50, TOWER_RANGE = 1.8 * TILE, TOWER_DMG = 1, TOWER_RATE = 2; // 1 dmg co 0,5 s
     const KILL_REWARD = 12;
 
     const canvas = document.getElementById("game");
