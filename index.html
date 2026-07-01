@@ -33,8 +33,8 @@
       image-rendering:auto; filter:drop-shadow(0 4px 4px rgba(0,0,0,0.35));
     }
     /* wysokości dobrane tak, by POSTAĆ miała podobny rozmiar w obu gifach */
-    .tower-sprite.sprite-idle   { height:25%; }
-    .tower-sprite.sprite-attack { height:22%; }
+    .tower-sprite.sprite-idle   { height:20%; }
+    .tower-sprite.sprite-attack { height:18%; }
     .controls { display:flex; gap:0.6rem; flex-wrap:wrap; justify-content:center; }
     button.btn {
       padding:0.65rem 1.2rem; font-size:0.95rem; font-weight:700; color:#fff; border:none;
@@ -307,9 +307,7 @@
         ctx.fillStyle = "rgba(55,48,163,0.25)";
         ctx.beginPath(); ctx.ellipse(t.x, t.y + 12, 22, 9, 0, 0, Math.PI * 2); ctx.fill();
       }
-      // pociski
-      ctx.fillStyle = "#1e293b";
-      for (const p of projectiles) { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); }
+      // pociski: niewidoczne — atak wieży jest animacją wręcz (melee)
       // wrogowie
       for (const e of enemies) {
         ctx.fillStyle = "#ef4444";
