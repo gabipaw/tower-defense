@@ -145,30 +145,35 @@
         ],
       },
     };
-    const TIMESTOP_DUR = 1.0;   // ile sekund wrogowie stoją w miejscu
-    const TIMESTOP_CD = 12;     // odnowienie zdolności (s)
+    const TIMESTOP_DUR = 6;     // ile sekund wrogowie stoją w miejscu (ZA WARUDO)
+    const TIMESTOP_CD = 60;     // odnowienie zdolności (1 minuta)
     let selectedType = "basic"; // typ do budowy (koszt 50 — zgodnie z testami)
     let selectedTower = null;   // postawiona wieża wybrana do ulepszenia / zdolności
     let timeStop = 0;           // pozostały czas globalnego stopu (s)
+    let stopHolder = null;      // JEDYNY Jotaro, który może użyć ZA WARUDO (pierwszy na L3)
 
     const stat = (t) => TOWER_TYPES[t.type].levels[t.level - 1];  // aktywne staty wg poziomu
     const isMax = (t) => t.level >= TOWER_TYPES[t.type].levels.length;
 
-    // Cel wieży: TRZYMAJ obecny cel, dopóki żyje i jest w zasięgu — bez żadnego
-    // przeskakiwania na „bliższego". Dzięki temu wróg na zakręcie, który chwilowo
-    // wygląda na dalszego w linii prostej, nie zostaje porzucony na rzecz tego za nim.
-    // Nowy cel łapiemy dopiero, gdy obecny zginie lub wyjdzie z zasięgu → najbliższy.
+    // Cel wieży: TRZYMAJ obecny cel, dopóki żyje i jest w zasięgu — bez przeskakiwania
+    // na „bliższego" (to psuło zabawę na zakrętach). Gdy trzeba złapać nowy cel, bierzemy
+    // wroga NAJDALEJ na trasie (pierwszego/lidera) spośród tych w zasięgu — nie najbliższego.
+    function progress(e) {                    // jak daleko wróg zaszedł na trasie (większe = dalej)
+      const wpx = pathPx[e.wp];
+      return e.wp * 100000 - (wpx ? Math.hypot(wpx.x - e.x, wpx.y - e.y) : 0);
+    }
     function pickTarget(t, range) {
       if (t.target && enemies.includes(t.target) &&
           Math.hypot(t.target.x - t.x, t.target.y - t.y) <= range) {
-        return t.target;                    // wciąż ważny → nie zmieniamy
+        return t.target;                     // wciąż ważny → nie zmieniamy
       }
-      let nearest = null, nd = Infinity;     // brak ważnego celu → złap najbliższego
+      let best = null, bestProg = -Infinity;  // nowy cel → pierwszy wróg (lider) w zasięgu
       for (const e of enemies) {
-        const d = Math.hypot(e.x - t.x, e.y - t.y);
-        if (d <= range && d < nd) { nd = d; nearest = e; }
+        if (Math.hypot(e.x - t.x, e.y - t.y) > range) continue;
+        const pr = progress(e);
+        if (pr > bestProg) { bestProg = pr; best = e; }
       }
-      return nearest;
+      return best;
     }
 
     const canvas = document.getElementById("game");
@@ -221,10 +226,12 @@
       } else {
         html += '<span class="stats">⭐ MAX</span>';
       }
-      if (st.timeStop) {
+      if (st.timeStop && t === stopHolder) {
         const cd = t.tsCd || 0;
         html += '<button class="btn za" data-act="timestop"' + (cd > 0 || phase !== "active" ? " disabled" : "") +
                 '>⏱️ ZA WARUDO' + (cd > 0 ? " (" + Math.ceil(cd) + "s)" : "") + "</button>";
+      } else if (st.timeStop) {
+        html += '<span class="stats">⏱️ ZA WARUDO zajęte przez innego Jotaro</span>';
       }
       html += '<button class="btn close" data-act="close">✖</button>';
       panel.innerHTML = html;
@@ -253,11 +260,12 @@
       const cost = stat(t).up;
       if (money < cost) return false;
       money -= cost; t.level += 1;
+      if (stat(t).timeStop && !stopHolder) stopHolder = t;  // pierwszy Jotaro na L3 = użytkownik ZA WARUDO
       syncHud(); refreshPanel();
       return true;
     }
     function activateTimeStop(t) {
-      if (!stat(t).timeStop || (t.tsCd || 0) > 0 || phase !== "active") return false;
+      if (t !== stopHolder || !stat(t).timeStop || (t.tsCd || 0) > 0 || phase !== "active") return false;
       timeStop = TIMESTOP_DUR; t.tsCd = TIMESTOP_CD;
       refreshPanel();
       return true;
@@ -358,7 +366,7 @@
     function reset() {
       money = 120; lives = 15; wave = 0; phase = "idle";
       enemies = []; towers = []; projectiles = []; toSpawn = 0; spawnTimer = 0; hover = null;
-      selectedTower = null; timeStop = 0;
+      selectedTower = null; timeStop = 0; stopHolder = null;
       towersLayer.innerHTML = "";
       setBanner("");
       syncHud();

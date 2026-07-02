@@ -104,3 +104,19 @@ test("ZA WARUDO działa dopiero dla Jotaro na 3. poziomie", async ({ page }) => 
   expect(await page.evaluate(() => window.TD.timeStop(0, 0))).toBe(true);
   expect((await state(page)).frozen).toBe(true);
 });
+
+test("ZA WARUDO może użyć tylko jeden Jotaro (pierwszy na L3)", async ({ page }) => {
+  await page.evaluate(() => {
+    window.TD.giveMoney(2000);
+    window.TD.select("jotaro");
+    window.TD.tryPlace(0, 0); window.TD.upgrade(0, 0); window.TD.upgrade(0, 0);  // 1. Jotaro → L3 = użytkownik
+    window.TD.tryPlace(0, 2); window.TD.upgrade(0, 2); window.TD.upgrade(0, 2);  // 2. Jotaro → L3, ale bez zdolności
+    window.TD.startWave();
+  });
+  // drugi Jotaro (mimo L3) nie może odpalić ZA WARUDO
+  expect(await page.evaluate(() => window.TD.timeStop(0, 2))).toBe(false);
+  expect((await state(page)).frozen).toBe(false);
+  // pierwszy może
+  expect(await page.evaluate(() => window.TD.timeStop(0, 0))).toBe(true);
+  expect((await state(page)).frozen).toBe(true);
+});
