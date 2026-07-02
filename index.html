@@ -52,6 +52,17 @@
     .tower-picker .tw .cost { color:var(--muted); font-weight:600; }
     .tower-picker .tw.sel { border-color:var(--brand); background:#eef2ff; box-shadow:0 6px 16px -10px rgba(79,70,229,0.7); }
     .tower-picker .tw.poor { opacity:0.5; }
+    .tower-panel[hidden] { display:none; }
+    .tower-panel {
+      display:flex; flex-wrap:wrap; gap:0.5rem 0.9rem; align-items:center; justify-content:center;
+      background:#fff; border:1px solid var(--line); border-radius:0.9rem; padding:0.55rem 0.9rem;
+      box-shadow:0 12px 30px -20px rgba(79,70,229,0.4); font-size:0.9rem; font-weight:600;
+    }
+    .tower-panel .title { font-weight:800; }
+    .tower-panel .stats { color:var(--muted); }
+    .tower-panel button { padding:0.5rem 0.9rem; font-size:0.88rem; }
+    .tower-panel .za { background:linear-gradient(135deg,#7c3aed,#4c1d95); }
+    .tower-panel .close { background:#eef2ff; color:var(--brand-dark); }
     .hint { color:var(--muted); font-size:0.85rem; text-align:center; max-width:40rem; }
     .banner {
       font-size:1.1rem; font-weight:800; text-align:center; min-height:1.5rem;
@@ -80,6 +91,8 @@
 
   <div class="tower-picker" id="towerPicker" data-testid="towerPicker"></div>
 
+  <div class="tower-panel" id="towerPanel" data-testid="towerPanel" hidden></div>
+
   <div class="controls">
     <button class="btn" id="start" data-testid="start">▶️ Start fali</button>
     <button class="btn secondary" id="reset" data-testid="reset">🔄 Nowa gra</button>
@@ -97,27 +110,49 @@
     // ── Katalog wież. Nowy typ = jeden wpis + para zapętlonych gifów (idle/attack). ──
     //  melee : doskok i obrót ku wrogowi, cios wręcz (pocisk niewidoczny).
     //  ranged: stoi na kaflu, tylko odbicie lewo/prawo; leci widoczny pocisk (kula lub strzała).
+    //  Każda wieża ma 3 poziomy (levels[]). Ulepszanie zwiększa staty; `up` = koszt
+    //  ulepszenia do następnego poziomu (0 = poziom maksymalny).
     const TOWER_TYPES = {
-      basic: {                                  // prosta wieża startowa
+      basic: {                                  // prosta wieża startowa (ranged)
         name: "Działko", icon: "🔫", cost: 50,
-        range: 1.8 * TILE, dmg: 2, rate: 0.8,   // wolno, ale przyzwoicie mocno (2 dmg co 1,25 s)
         melee: false, projColor: "#2563eb", projSize: 5, projSpeed: 340,
         idle: "basic_idle.gif", attack: "basic_attack.gif", idleH: "12%", attackH: "13%",
+        levels: [
+          { dmg: 2, rate: 0.8, range: 1.8 * TILE, up: 40 },   // L1 → koszt do L2
+          { dmg: 3, rate: 1.0, range: 2.0 * TILE, up: 70 },   // L2 → koszt do L3
+          { dmg: 5, rate: 1.2, range: 2.3 * TILE, up: 0  },   // L3 (max)
+        ],
       },
       archer: {                                 // wieża dystansowa
         name: "Łucznik", icon: "🏹", cost: 70,
-        range: 2.8 * TILE, dmg: 1, rate: 1.5,   // daleki zasięg, szybkie strzały
         melee: false, arrow: true, projColor: "#a16207", projSpeed: 560,
         idle: "archer_idle.gif", attack: "archer_attack.gif", idleH: "12%", attackH: "13%",
+        levels: [
+          { dmg: 1, rate: 1.5, range: 2.8 * TILE, up: 60 },
+          { dmg: 2, rate: 1.8, range: 3.1 * TILE, up: 90 },
+          { dmg: 3, rate: 2.2, range: 3.5 * TILE, up: 0  },
+        ],
       },
-      jotaro: {                                 // walka wręcz (dotychczasowa wieża)
+      jotaro: {                                 // walka wręcz z NARASTAJĄCYM DPS-em (Star Platinum)
         name: "Jotaro", icon: "🥊", cost: 50,
-        range: 1.8 * TILE, dmg: 1, rate: 2,     // szybkie ciosy z bliska
         melee: true, lunge: 0.5 * TILE, facingOffset: 0,
         idle: "spawn.gif", attack: "tower.gif", idleH: "13%", attackH: "15%",
+        ramp: true, rampMax: 3, rampTime: 4,    // im dłużej bije, tym mocniej: do 3× po 4 s ciągłego ataku
+        levels: [
+          { dps: 0.5, range: 1.8 * TILE, up: 60  },               // L1
+          { dps: 1.0, range: 1.8 * TILE, up: 100 },               // L2
+          { dps: 2.0, range: 2.0 * TILE, up: 0, timeStop: true }, // L3: + ZA WARUDO (stop czasu na 1 s)
+        ],
       },
     };
-    let selectedType = "basic";  // domyślnie wybrana wieża (koszt 50 — zgodnie z testami)
+    const TIMESTOP_DUR = 1.0;   // ile sekund wrogowie stoją w miejscu
+    const TIMESTOP_CD = 12;     // odnowienie zdolności (s)
+    let selectedType = "basic"; // typ do budowy (koszt 50 — zgodnie z testami)
+    let selectedTower = null;   // postawiona wieża wybrana do ulepszenia / zdolności
+    let timeStop = 0;           // pozostały czas globalnego stopu (s)
+
+    const stat = (t) => TOWER_TYPES[t.type].levels[t.level - 1];  // aktywne staty wg poziomu
+    const isMax = (t) => t.level >= TOWER_TYPES[t.type].levels.length;
 
     const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
@@ -147,6 +182,70 @@
       }
     }
 
+    // ── panel wybranej (postawionej) wieży: staty, ulepszenie, zdolność ──
+    const tiles = (px) => Math.round(px / TILE * 10) / 10;   // zasięg w kaflach (ładniejszy zapis)
+    function statLine(t) {
+      const def = TOWER_TYPES[t.type], st = stat(t);
+      if (def.ramp) return "DPS " + st.dps + "/s (rośnie do " + def.rampMax + "× im dłużej bije) • zasięg " + tiles(st.range);
+      return "obrażenia " + st.dmg + " • tempo " + st.rate + "/s • zasięg " + tiles(st.range);
+    }
+    function selectTower(t) { selectedTower = t; refreshPanel(); }
+    function refreshPanel() {
+      const panel = document.getElementById("towerPanel");
+      if (!selectedTower || !towers.includes(selectedTower)) {
+        selectedTower = null; panel.hidden = true; panel.innerHTML = ""; return;
+      }
+      const t = selectedTower, def = TOWER_TYPES[t.type], st = stat(t);
+      let html = '<span class="title">' + def.icon + " " + def.name + " — poz. " + t.level + "/" + def.levels.length + "</span>";
+      html += '<span class="stats">' + statLine(t) + "</span>";
+      if (!isMax(t)) {
+        html += '<button class="btn" data-act="upgrade"' + (money < st.up ? " disabled" : "") +
+                '>⬆️ Ulepsz (💰 ' + st.up + ")</button>";
+      } else {
+        html += '<span class="stats">⭐ MAX</span>';
+      }
+      if (st.timeStop) {
+        const cd = t.tsCd || 0;
+        html += '<button class="btn za" data-act="timestop"' + (cd > 0 || phase !== "active" ? " disabled" : "") +
+                '>⏱️ ZA WARUDO' + (cd > 0 ? " (" + Math.ceil(cd) + "s)" : "") + "</button>";
+      }
+      html += '<button class="btn close" data-act="close">✖</button>';
+      panel.innerHTML = html;
+      panel.hidden = false;
+      panel.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+        if (b.dataset.act === "upgrade") upgradeTower(t);
+        else if (b.dataset.act === "timestop") activateTimeStop(t);
+        else { selectedTower = null; refreshPanel(); }
+      }));
+    }
+    // lekka aktualizacja przycisków co klatkę (bez przebudowy panelu — nie gubi kliknięć)
+    function tickPanel() {
+      if (!selectedTower || !towers.includes(selectedTower)) return;
+      const panel = document.getElementById("towerPanel");
+      const up = panel.querySelector('[data-act="upgrade"]');
+      if (up) up.disabled = money < stat(selectedTower).up;
+      const za = panel.querySelector('[data-act="timestop"]');
+      if (za) {
+        const cd = selectedTower.tsCd || 0;
+        za.disabled = cd > 0 || phase !== "active";
+        za.textContent = "⏱️ ZA WARUDO" + (cd > 0 ? " (" + Math.ceil(cd) + "s)" : "");
+      }
+    }
+    function upgradeTower(t) {
+      if (isMax(t)) return false;
+      const cost = stat(t).up;
+      if (money < cost) return false;
+      money -= cost; t.level += 1;
+      syncHud(); refreshPanel();
+      return true;
+    }
+    function activateTimeStop(t) {
+      if (!stat(t).timeStop || (t.tsCd || 0) > 0 || phase !== "active") return false;
+      timeStop = TIMESTOP_DUR; t.tsCd = TIMESTOP_CD;
+      refreshPanel();
+      return true;
+    }
+
     // dodaje sprite wieży wg jej typu: startuje zapętloną animacją spoczynku
     function addTowerSprite(t) {
       const def = TOWER_TYPES[t.type];
@@ -167,11 +266,11 @@
     function updateTowerSprites() {
       for (const t of towers) {
         if (!t.el) continue;
-        const def = TOWER_TYPES[t.type];
+        const def = TOWER_TYPES[t.type], st = stat(t);
         let target = null, best = Infinity;
         for (const e of enemies) {
           const d = Math.hypot(e.x - t.x, e.y - t.y);
-          if (d <= def.range && d < best) { best = d; target = e; }
+          if (d <= st.range && d < best) { best = d; target = e; }
         }
 
         if (target) {
@@ -243,9 +342,11 @@
     function reset() {
       money = 120; lives = 15; wave = 0; phase = "idle";
       enemies = []; towers = []; projectiles = []; toSpawn = 0; spawnTimer = 0; hover = null;
+      selectedTower = null; timeStop = 0;
       towersLayer.innerHTML = "";
       setBanner("");
       syncHud();
+      refreshPanel();
     }
 
     function setBanner(text, cls) {
@@ -293,7 +394,7 @@
       const def = TOWER_TYPES[type || selectedType];
       if (!def || money < def.cost) return false;
       const p = center(c, r);
-      const t = { c, r, x: p.x, y: p.y, cd: 0, type: type || selectedType };
+      const t = { c, r, x: p.x, y: p.y, cd: 0, type: type || selectedType, level: 1, ramp: 0, tsCd: 0 };
       towers.push(t);
       addTowerSprite(t);
       money -= def.cost;
@@ -305,14 +406,19 @@
     function update(dt) {
       if (phase !== "active") return;
 
-      // spawn
-      if (toSpawn > 0) {
+      // zegary zdolności: globalny stop czasu + cooldowny wież
+      if (timeStop > 0) timeStop = Math.max(0, timeStop - dt);
+      for (const t of towers) if (t.tsCd > 0) t.tsCd = Math.max(0, t.tsCd - dt);
+      const frozen = timeStop > 0;   // ZA WARUDO: wrogowie stoją, wieże wciąż biją
+
+      // spawn (wstrzymany w czasie stopu)
+      if (!frozen && toSpawn > 0) {
         spawnTimer -= dt;
         if (spawnTimer <= 0) { spawnEnemy(); toSpawn -= 1; spawnTimer = 0.75; }
       }
 
-      // wrogowie
-      for (const e of enemies) {
+      // wrogowie (nie ruszają się podczas stopu czasu)
+      if (!frozen) for (const e of enemies) {
         if (!e.alive) continue;
         const wp = pathPx[e.wp];
         if (!wp) { e.alive = false; e.leaked = true; continue; }
@@ -329,22 +435,37 @@
       if (enemies.some((e) => e.leaked)) syncHud();
       enemies = enemies.filter((e) => e.alive && !e.leaked);
 
-      // wieże atakują
+      // wieże atakują (również podczas stopu czasu — biją w zamrożonych wrogów)
       for (const t of towers) {
-        const def = TOWER_TYPES[t.type];
-        t.cd -= dt;
-        if (t.cd > 0) continue;
+        const def = TOWER_TYPES[t.type], st = stat(t);
         let target = null, best = Infinity;
         for (const e of enemies) {
           const d = Math.hypot(e.x - t.x, e.y - t.y);
-          if (d <= def.range && d < best) { best = d; target = e; }
+          if (d <= st.range && d < best) { best = d; target = e; }
         }
+
+        if (def.ramp) {
+          // Jotaro: ciągłe obrażenia, które rosną im dłużej bez przerwy atakuje
+          if (target) {
+            t.ramp = Math.min(def.rampTime, t.ramp + dt);
+            const mult = 1 + (def.rampMax - 1) * (t.ramp / def.rampTime);
+            target.hp -= st.dps * mult * dt;
+            if (target.hp <= 0 && target.alive) { target.alive = false; money += KILL_REWARD; }
+          } else {
+            t.ramp = Math.max(0, t.ramp - dt * 2);  // stygnie szybciej, niż narasta
+          }
+          continue;  // brak pocisków — cios wręcz
+        }
+
+        // pozostałe wieże: strzał co 1/rate, obrażenia wg poziomu
+        t.cd -= dt;
+        if (t.cd > 0) continue;
         if (target) {
           projectiles.push({
-            x: t.x, y: t.y, target, speed: def.projSpeed || 420, dmg: def.dmg,
+            x: t.x, y: t.y, target, speed: def.projSpeed || 420, dmg: st.dmg,
             visible: !def.melee, arrow: def.arrow, color: def.projColor, size: def.projSize || 4,
           });
-          t.cd = 1 / def.rate;
+          t.cd = 1 / st.rate;
         }
       }
 
@@ -382,19 +503,33 @@
         ctx.strokeStyle = "rgba(0,0,0,0.05)";
         ctx.strokeRect(c * TILE, r * TILE, TILE, TILE);
       }
-      // podgląd budowy (zasięg wybranego typu wieży)
+      // podgląd budowy (zasięg wybranego typu na poziomie 1)
       const selDef = TOWER_TYPES[selectedType];
       if (hover && canBuild(hover.c, hover.r) && money >= selDef.cost && phase !== "win" && phase !== "lose") {
         const p = center(hover.c, hover.r);
         ctx.fillStyle = "rgba(79,70,229,0.15)";
-        ctx.beginPath(); ctx.arc(p.x, p.y, selDef.range, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, selDef.levels[0].range, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = "rgba(79,70,229,0.35)";
         ctx.fillRect(hover.c * TILE + 10, hover.r * TILE + 10, TILE - 20, TILE - 20);
       }
-      // wieże: na canvasie tylko podstawka; sam sprite (gif) jest nakładką <img>
+      // zasięg wybranej (postawionej) wieży
+      if (selectedTower && towers.includes(selectedTower)) {
+        ctx.fillStyle = "rgba(16,185,129,0.12)";
+        ctx.beginPath(); ctx.arc(selectedTower.x, selectedTower.y, stat(selectedTower).range, 0, Math.PI * 2); ctx.fill();
+      }
+      // wieże: podstawka + pigułki poziomu; sam sprite (gif) jest nakładką <img>
       for (const t of towers) {
         ctx.fillStyle = "rgba(55,48,163,0.25)";
         ctx.beginPath(); ctx.ellipse(t.x, t.y + 12, 22, 9, 0, 0, Math.PI * 2); ctx.fill();
+        if (t === selectedTower) {  // obwódka wybranej wieży
+          ctx.strokeStyle = "#10b981"; ctx.lineWidth = 3;
+          ctx.strokeRect(t.c * TILE + 4, t.r * TILE + 4, TILE - 8, TILE - 8);
+        }
+        // pigułki poziomu (1–3) w rogu kafla
+        for (let i = 0; i < TOWER_TYPES[t.type].levels.length; i++) {
+          ctx.fillStyle = i < t.level ? "#f59e0b" : "rgba(0,0,0,0.18)";
+          ctx.fillRect(t.c * TILE + 6 + i * 8, t.r * TILE + 6, 6, 4);
+        }
       }
       // pociski: melee niewidoczne; ranged rysujemy (kula działka / strzała łucznika)
       for (const p of projectiles) {
@@ -420,6 +555,16 @@
         ctx.fillStyle = "#00000030"; ctx.fillRect(x, y, w, h);
         ctx.fillStyle = "#22c55e"; ctx.fillRect(x, y, w * Math.max(0, e.hp / e.maxHp), h);
       }
+      // ZA WARUDO — zatrzymany czas
+      if (timeStop > 0) {
+        ctx.fillStyle = "rgba(76,29,149,0.28)";
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = "#fde047";
+        ctx.font = "bold 46px system-ui, sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("ZA WARUDO — czas stanął!", W / 2, H / 2);
+        ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
+      }
     }
 
     let last = 0;
@@ -428,6 +573,7 @@
       last = ts;
       update(dt);
       updateTowerSprites();
+      tickPanel();
       draw();
       requestAnimationFrame(loop);
     }
@@ -439,7 +585,12 @@
       const y = (clientY - rect.top) / rect.height * H;
       return { c: Math.floor(x / TILE), r: Math.floor(y / TILE) };
     }
-    canvas.addEventListener("click", (e) => { const t = toTile(e.clientX, e.clientY); tryPlace(t.c, t.r); });
+    canvas.addEventListener("click", (e) => {
+      const tile = toTile(e.clientX, e.clientY);
+      const existing = towers.find((t) => t.c === tile.c && t.r === tile.r);
+      if (existing) selectTower(existing);                       // klik w wieżę → panel ulepszeń
+      else if (tryPlace(tile.c, tile.r)) { selectedTower = null; refreshPanel(); }  // klik w trawę → budowa
+    });
     canvas.addEventListener("mousemove", (e) => { hover = toTile(e.clientX, e.clientY); });
     canvas.addEventListener("mouseleave", () => { hover = null; });
 
@@ -449,8 +600,12 @@
     // hook testowy / debug
     window.TD = {
       startWave, tryPlace, reset,
-      state: () => ({ money, lives, wave, phase, enemies: enemies.length, towers: towers.length, toSpawn, selected: selectedType }),
+      state: () => ({ money, lives, wave, phase, enemies: enemies.length, towers: towers.length, toSpawn, selected: selectedType, frozen: timeStop > 0 }),
       select: (type) => { if (TOWER_TYPES[type]) { selectedType = type; refreshPicker(); } },
+      giveMoney: (n) => { money += n; syncHud(); },   // pomocnik do testów/debugowania
+      upgrade: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? upgradeTower(t) : false; },
+      level: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? t.level : 0; },
+      timeStop: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? activateTimeStop(t) : false; },
     };
 
     buildPicker();

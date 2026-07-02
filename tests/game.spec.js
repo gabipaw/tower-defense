@@ -58,3 +58,49 @@ test("Nowa gra przywraca stan początkowy", async ({ page }) => {
   const s = await state(page);
   expect(s).toMatchObject({ money: 120, lives: 15, wave: 0, phase: "idle", towers: 0 });
 });
+
+test("ulepszenie wieży podnosi poziom i pobiera złoto", async ({ page }) => {
+  // basic: koszt budowy 50 (120→70), ulepszenie L1→L2 kosztuje 40 (70→30)
+  const before = await page.evaluate(() => {
+    window.TD.tryPlace(0, 0);
+    return { lvl: window.TD.level(0, 0), money: window.TD.state().money };
+  });
+  expect(before).toEqual({ lvl: 1, money: 70 });
+  const ok = await page.evaluate(() => window.TD.upgrade(0, 0));
+  expect(ok).toBe(true);
+  expect(await page.evaluate(() => window.TD.level(0, 0))).toBe(2);
+  expect((await state(page)).money).toBe(30);
+});
+
+test("brak złota blokuje ulepszenie", async ({ page }) => {
+  // po budowie (70) ulepsz L1→L2 (30), potem L2→L3 kosztuje 70 > 30 → blokada
+  const ok = await page.evaluate(() => {
+    window.TD.tryPlace(0, 0);
+    window.TD.upgrade(0, 0);            // 70 → 30, poziom 2
+    return window.TD.upgrade(0, 0);     // koszt 70 > 30
+  });
+  expect(ok).toBe(false);
+  expect(await page.evaluate(() => window.TD.level(0, 0))).toBe(2);
+});
+
+test("ZA WARUDO działa dopiero dla Jotaro na 3. poziomie", async ({ page }) => {
+  await page.evaluate(() => {
+    window.TD.select("jotaro");
+    window.TD.tryPlace(0, 0);           // Jotaro L1
+    window.TD.startWave();              // zdolność wymaga aktywnej fali
+  });
+  // L1 — brak zdolności
+  expect(await page.evaluate(() => window.TD.timeStop(0, 0))).toBe(false);
+  // dobij do L3
+  await page.evaluate(() => { window.TD.reset(); });
+  await page.evaluate(() => {
+    window.TD.select("jotaro");
+    window.TD.tryPlace(0, 0);
+    window.TD.giveMoney(300);                          // stać na dwa ulepszenia
+    window.TD.upgrade(0, 0); window.TD.upgrade(0, 0);  // L3
+    window.TD.startWave();
+  });
+  expect(await page.evaluate(() => window.TD.level(0, 0))).toBe(3);
+  expect(await page.evaluate(() => window.TD.timeStop(0, 0))).toBe(true);
+  expect((await state(page)).frozen).toBe(true);
+});
