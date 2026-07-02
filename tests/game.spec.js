@@ -134,3 +134,9 @@ test("fala 10 to miniboss, fala 20 to boss", async ({ page }) => {
 test("maksymalna liczba fal to 20", async ({ page }) => {
   await expect(page.locator("#maxwave")).toHaveText("20");
 });
+
+test("auto-fale same startują kolejną falę (bez klikania)", async ({ page }) => {
+  await page.evaluate(() => window.TD.setAuto(true));
+  await expect.poll(() => page.evaluate(() => window.TD.state().wave), { timeout: 8000 }).toBeGreaterThan(0);
+  expect((await state(page)).phase).toBe("active");
+});

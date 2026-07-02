@@ -95,6 +95,7 @@
 
   <div class="controls">
     <button class="btn" id="start" data-testid="start">▶️ Start fali</button>
+    <button class="btn secondary" id="auto" data-testid="auto">⏩ Auto-fale: WYŁ</button>
     <button class="btn secondary" id="reset" data-testid="reset">🔄 Nowa gra</button>
   </div>
   <p class="hint">Wybierz typ wieży powyżej, potem kliknij / dotknij wolne pole (trawa), aby ją postawić. Wieże atakują wrogów w zasięgu. Nie wpuść ich na koniec ścieżki!</p>
@@ -151,6 +152,8 @@
     let selectedTower = null;   // postawiona wieża wybrana do ulepszenia / zdolności
     let timeStop = 0;           // pozostały czas globalnego stopu (s)
     let stopHolder = null;      // JEDYNY Jotaro, który może użyć ZA WARUDO (pierwszy na L3)
+    const AUTO_DELAY = 3;       // ile sekund przerwy przed automatyczną falą
+    let autoWave = false, autoTimer = 0;  // auto-fale: sam startuje kolejne fale
 
     const stat = (t) => TOWER_TYPES[t.type].levels[t.level - 1];  // aktywne staty wg poziomu
     const isMax = (t) => t.level >= TOWER_TYPES[t.type].levels.length;
@@ -608,11 +611,25 @@
       }
     }
 
+    // auto-fale: między falami odlicza i sam odpala kolejną (bez klikania)
+    function handleAutoWave(dt) {
+      if (!autoWave || phase !== "idle" || wave >= MAX_WAVES) { autoTimer = AUTO_DELAY; return; }
+      autoTimer -= dt;
+      if (autoTimer <= 0) { autoTimer = AUTO_DELAY; startWave(); }
+      else setBanner("⏩ Następna fala za " + Math.ceil(autoTimer) + " s…");
+    }
+    function updateAutoBtn() {
+      const btn = document.getElementById("auto");
+      btn.textContent = "⏩ Auto-fale: " + (autoWave ? "WŁ" : "WYŁ");
+      btn.className = "btn" + (autoWave ? "" : " secondary");
+    }
+
     let last = 0;
     function loop(ts) {
       const dt = Math.min(0.05, (ts - last) / 1000 || 0);
       last = ts;
       update(dt);
+      handleAutoWave(dt);
       updateTowerSprites();
       tickPanel();
       draw();
@@ -637,12 +654,16 @@
 
     document.getElementById("start").addEventListener("click", startWave);
     document.getElementById("reset").addEventListener("click", reset);
+    document.getElementById("auto").addEventListener("click", () => {
+      autoWave = !autoWave; autoTimer = AUTO_DELAY; updateAutoBtn();
+    });
 
     // hook testowy / debug
     window.TD = {
       startWave, tryPlace, reset,
-      state: () => ({ money, lives, wave, phase, enemies: enemies.length, towers: towers.length, toSpawn, selected: selectedType, frozen: timeStop > 0 }),
+      state: () => ({ money, lives, wave, phase, enemies: enemies.length, towers: towers.length, toSpawn, selected: selectedType, frozen: timeStop > 0, auto: autoWave }),
       select: (type) => { if (TOWER_TYPES[type]) { selectedType = type; refreshPicker(); } },
+      setAuto: (v) => { autoWave = !!v; autoTimer = AUTO_DELAY; updateAutoBtn(); },
       giveMoney: (n) => { money += n; syncHud(); },   // pomocnik do testów/debugowania
       upgrade: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? upgradeTower(t) : false; },
       level: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? t.level : 0; },
@@ -654,6 +675,7 @@
     };
 
     buildPicker();
+    updateAutoBtn();
     reset();
     requestAnimationFrame(loop);
   })();
