@@ -138,11 +138,11 @@
         name: "Jotaro", icon: "🥊", cost: 90,
         melee: true, lunge: 0.5 * TILE, facingOffset: 0,
         idle: "spawn.gif", attack: "tower.gif", idleH: "13%", attackH: "15%",
-        ramp: true, rampMax: 4, rampTime: 3,    // im dłużej bije JEDEN cel, tym mocniej: do 4× po 3 s
+        ramp: true, rampMax: 4, rampTime: 3, hitEvery: 0.2,  // cios co 0,2 s; rozpęd do 4× po 3 s bicia
         levels: [
-          { dps: 0.5, range: 1.9 * TILE, up: 90  },               // L1 (do 2,0 dps po rozpędzeniu)
-          { dps: 1.0, range: 2.1 * TILE, up: 140 },               // L2 (do 4,0 dps)
-          { dps: 2.0, range: 2.3 * TILE, up: 0, timeStop: true }, // L3: do 8,0 dps (najwięcej w grze) + ZA WARUDO
+          { hit: 1, range: 1.9 * TILE, up: 90  },               // L1: 1 dmg / 0,2 s = 5 dps (do 20 po rozpędzeniu)
+          { hit: 2, range: 2.1 * TILE, up: 140 },               // L2: 2 dmg / 0,2 s = 10 dps
+          { hit: 3, range: 2.3 * TILE, up: 0, timeStop: true }, // L3: 3 dmg / 0,2 s = 15 dps + ZA WARUDO
         ],
       },
     };
@@ -211,7 +211,7 @@
     const tiles = (px) => Math.round(px / TILE * 10) / 10;   // zasięg w kaflach (ładniejszy zapis)
     function statLine(t) {
       const def = TOWER_TYPES[t.type], st = stat(t);
-      if (def.ramp) return "DPS " + st.dps + "/s (rośnie do " + def.rampMax + "× im dłużej bije) • zasięg " + tiles(st.range);
+      if (def.ramp) return st.hit + " dmg co " + def.hitEvery + " s (do " + def.rampMax + "× im dłużej bije) • zasięg " + tiles(st.range);
       return "obrażenia " + st.dmg + " • tempo " + st.rate + "/s • zasięg " + tiles(st.range);
     }
     function selectTower(t) { selectedTower = t; refreshPanel(); }
@@ -482,14 +482,19 @@
         const target = t.target;
 
         if (def.ramp) {
-          // Jotaro: ciągłe obrażenia, które rosną im dłużej bez przerwy atakuje
+          // Jotaro: cios co hitEvery s; siła ciosu rośnie, im dłużej bez przerwy atakuje
           if (target) {
             t.ramp = Math.min(def.rampTime, t.ramp + dt);
-            const mult = 1 + (def.rampMax - 1) * (t.ramp / def.rampTime);
-            target.hp -= st.dps * mult * dt;
-            if (target.hp <= 0 && target.alive) { target.alive = false; money += target.reward || KILL_REWARD; }
+            t.cd -= dt;
+            if (t.cd <= 0) {
+              const mult = 1 + (def.rampMax - 1) * (t.ramp / def.rampTime);
+              target.hp -= st.hit * mult;            // 1 dmg na cios (×poziom, ×rozpęd)
+              t.cd = def.hitEvery;
+              if (target.hp <= 0 && target.alive) { target.alive = false; money += target.reward || KILL_REWARD; }
+            }
           } else {
-            t.ramp = Math.max(0, t.ramp - dt * 2);  // stygnie szybciej, niż narasta
+            t.ramp = Math.max(0, t.ramp - dt * 2);   // stygnie szybciej, niż narasta
+            t.cd = 0;                                 // nowy cel → cios od razu
           }
           continue;  // brak pocisków — cios wręcz
         }
@@ -670,6 +675,7 @@
       targetId: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t && t.target ? t.target.id : null; },
       enemyKinds: () => enemies.map((e) => e.kind),          // do testów/debugowania
       enemyHp: () => enemies.reduce((s, e) => s + e.hp, 0),  // suma HP wrogów (do testów)
+      targetHp: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t && t.target ? t.target.hp : null; },
       forceWave: (n) => { wave = n - 1; },                   // następny startWave() da falę n
       timeStop: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? activateTimeStop(t) : false; },
     };
