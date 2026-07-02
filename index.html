@@ -134,15 +134,14 @@
           { dmg: 3, rate: 2.3, range: 3.6 * TILE, up: 0  },   // 6,9 dps
         ],
       },
-      jotaro: {                                 // NAJLEPSZA wieża: drogi premium z narastającym DPS-em (Star Platinum)
-        name: "Jotaro", icon: "🥊", cost: 90,
+      jotaro: {                                 // droga wieża-UTILITY: skromny stały DPS, ale ZA WARUDO
+        name: "Jotaro", icon: "🥊", cost: 300,
         melee: true, lunge: 0.5 * TILE, facingOffset: 0,
         idle: "spawn.gif", attack: "tower.gif", idleH: "13%", attackH: "15%",
-        ramp: true, rampMax: 4, rampTime: 3, hitEvery: 0.2,  // cios co 0,2 s; rozpęd do 4× po 3 s bicia
         levels: [
-          { hit: 1, range: 1.9 * TILE, up: 90  },               // L1: 1 dmg / 0,2 s = 5 dps (do 20 po rozpędzeniu)
-          { hit: 2, range: 2.1 * TILE, up: 140 },               // L2: 2 dmg / 0,2 s = 10 dps
-          { hit: 3, range: 2.3 * TILE, up: 0, timeStop: true }, // L3: 3 dmg / 0,2 s = 15 dps + ZA WARUDO
+          { dps: 3, range: 1.9 * TILE, up: 120 },                // L1: 3 dmg/s
+          { dps: 4, range: 2.1 * TILE, up: 180 },                // L2: 4 dmg/s
+          { dps: 5, range: 2.3 * TILE, up: 0, timeStop: true },  // L3: 5 dmg/s + ZA WARUDO
         ],
       },
     };
@@ -211,7 +210,7 @@
     const tiles = (px) => Math.round(px / TILE * 10) / 10;   // zasięg w kaflach (ładniejszy zapis)
     function statLine(t) {
       const def = TOWER_TYPES[t.type], st = stat(t);
-      if (def.ramp) return st.hit + " dmg co " + def.hitEvery + " s (do " + def.rampMax + "× im dłużej bije) • zasięg " + tiles(st.range);
+      if (def.melee) return "DPS " + st.dps + "/s • zasięg " + tiles(st.range);
       return "obrażenia " + st.dmg + " • tempo " + st.rate + "/s • zasięg " + tiles(st.range);
     }
     function selectTower(t) { selectedTower = t; refreshPanel(); }
@@ -477,26 +476,17 @@
       // reszta wież zamarza razem ze światem.
       for (const t of towers) {
         const def = TOWER_TYPES[t.type], st = stat(t);
-        if (frozen && !def.ramp) continue;
+        if (frozen && !def.melee) continue;
         t.target = pickTarget(t, st.range);
         const target = t.target;
 
-        if (def.ramp) {
-          // Jotaro: cios co hitEvery s; siła ciosu rośnie, im dłużej bez przerwy atakuje
+        if (def.melee) {
+          // Jotaro: stały DPS do trzymanego celu (walka wręcz, bez pocisków)
           if (target) {
-            t.ramp = Math.min(def.rampTime, t.ramp + dt);
-            t.cd -= dt;
-            if (t.cd <= 0) {
-              const mult = 1 + (def.rampMax - 1) * (t.ramp / def.rampTime);
-              target.hp -= st.hit * mult;            // 1 dmg na cios (×poziom, ×rozpęd)
-              t.cd = def.hitEvery;
-              if (target.hp <= 0 && target.alive) { target.alive = false; money += target.reward || KILL_REWARD; }
-            }
-          } else {
-            t.ramp = Math.max(0, t.ramp - dt * 2);   // stygnie szybciej, niż narasta
-            t.cd = 0;                                 // nowy cel → cios od razu
+            target.hp -= st.dps * dt;
+            if (target.hp <= 0 && target.alive) { target.alive = false; money += target.reward || KILL_REWARD; }
           }
-          continue;  // brak pocisków — cios wręcz
+          continue;
         }
 
         // pozostałe wieże: strzał co 1/rate, obrażenia wg poziomu

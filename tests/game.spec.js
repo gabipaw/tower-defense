@@ -85,6 +85,7 @@ test("brak złota blokuje ulepszenie", async ({ page }) => {
 
 test("ZA WARUDO działa dopiero dla Jotaro na 3. poziomie", async ({ page }) => {
   await page.evaluate(() => {
+    window.TD.giveMoney(400);           // Jotaro kosztuje 300
     window.TD.select("jotaro");
     window.TD.tryPlace(0, 0);           // Jotaro L1
     window.TD.startWave();              // zdolność wymaga aktywnej fali
@@ -94,9 +95,9 @@ test("ZA WARUDO działa dopiero dla Jotaro na 3. poziomie", async ({ page }) => 
   // dobij do L3
   await page.evaluate(() => { window.TD.reset(); });
   await page.evaluate(() => {
+    window.TD.giveMoney(1000);                         // stać na Jotaro + dwa ulepszenia
     window.TD.select("jotaro");
     window.TD.tryPlace(0, 0);
-    window.TD.giveMoney(300);                          // stać na dwa ulepszenia
     window.TD.upgrade(0, 0); window.TD.upgrade(0, 0);  // L3
     window.TD.startWave();
   });
