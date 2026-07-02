@@ -118,9 +118,9 @@
         melee: false, projColor: "#2563eb", projSize: 5, projSpeed: 340,
         idle: "basic_idle.gif", attack: "basic_attack.gif", idleH: "12%", attackH: "13%",
         levels: [
-          { dmg: 2, rate: 0.8, range: 1.8 * TILE, up: 40 },   // L1 → koszt do L2
-          { dmg: 3, rate: 1.0, range: 2.0 * TILE, up: 70 },   // L2 → koszt do L3
-          { dmg: 5, rate: 1.2, range: 2.3 * TILE, up: 0  },   // L3 (max)
+          { dmg: 2, rate: 1.0, range: 1.8 * TILE, up: 40 },   // L1 → koszt do L2 (2,0 dps)
+          { dmg: 3, rate: 1.1, range: 2.0 * TILE, up: 80 },   // L2 → koszt do L3 (3,3 dps)
+          { dmg: 5, rate: 1.3, range: 2.2 * TILE, up: 0  },   // L3 (max, 6,5 dps)
         ],
       },
       archer: {                                 // wieża dystansowa
@@ -128,20 +128,20 @@
         melee: false, arrow: true, projColor: "#a16207", projSpeed: 560,
         idle: "archer_idle.gif", attack: "archer_attack.gif", idleH: "12%", attackH: "13%",
         levels: [
-          { dmg: 1, rate: 1.5, range: 2.8 * TILE, up: 60 },
-          { dmg: 2, rate: 1.8, range: 3.1 * TILE, up: 90 },
-          { dmg: 3, rate: 2.2, range: 3.5 * TILE, up: 0  },
+          { dmg: 1, rate: 1.6, range: 2.8 * TILE, up: 55 },   // 1,6 dps, długi zasięg
+          { dmg: 2, rate: 1.9, range: 3.1 * TILE, up: 85 },   // 3,8 dps
+          { dmg: 3, rate: 2.3, range: 3.6 * TILE, up: 0  },   // 6,9 dps
         ],
       },
       jotaro: {                                 // walka wręcz z NARASTAJĄCYM DPS-em (Star Platinum)
-        name: "Jotaro", icon: "🥊", cost: 50,
+        name: "Jotaro", icon: "🥊", cost: 45,
         melee: true, lunge: 0.5 * TILE, facingOffset: 0,
         idle: "spawn.gif", attack: "tower.gif", idleH: "13%", attackH: "15%",
-        ramp: true, rampMax: 3, rampTime: 4,    // im dłużej bije, tym mocniej: do 3× po 4 s ciągłego ataku
+        ramp: true, rampMax: 3, rampTime: 3,    // im dłużej bije JEDEN cel, tym mocniej: do 3× po 3 s
         levels: [
-          { dps: 0.5, range: 1.8 * TILE, up: 60  },               // L1
-          { dps: 1.0, range: 1.8 * TILE, up: 100 },               // L2
-          { dps: 2.0, range: 2.0 * TILE, up: 0, timeStop: true }, // L3: + ZA WARUDO (stop czasu na 1 s)
+          { dps: 0.5, range: 1.9 * TILE, up: 55 },                // L1 (do 1,5 dps po rozpędzeniu)
+          { dps: 1.0, range: 2.0 * TILE, up: 90 },                // L2 (do 3,0 dps)
+          { dps: 2.0, range: 2.2 * TILE, up: 0, timeStop: true }, // L3: do 6,0 dps + ZA WARUDO
         ],
       },
     };
@@ -153,6 +153,23 @@
 
     const stat = (t) => TOWER_TYPES[t.type].levels[t.level - 1];  // aktywne staty wg poziomu
     const isMax = (t) => t.level >= TOWER_TYPES[t.type].levels.length;
+
+    // Cel wieży: najbliższy wróg w zasięgu, ale z HISTEREZĄ — trzyma obecny cel,
+    // dopóki żyje i jest w zasięgu, i nikt nie jest wyraźnie (>35%) bliżej. Dzięki temu
+    // Jotaro nie „przykleja się" do lidera znikającego za zakrętem ani nie miga między
+    // wrogami klatka po klatce, a jego DPS narasta na jednym celu.
+    function pickTarget(t, range) {
+      let nearest = null, nd = Infinity;
+      for (const e of enemies) {
+        const d = Math.hypot(e.x - t.x, e.y - t.y);
+        if (d <= range && d < nd) { nd = d; nearest = e; }
+      }
+      if (t.target && enemies.includes(t.target)) {
+        const dc = Math.hypot(t.target.x - t.x, t.target.y - t.y);
+        if (dc <= range && dc <= nd * 1.35) return t.target;
+      }
+      return nearest;
+    }
 
     const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
@@ -267,14 +284,13 @@
       for (const t of towers) {
         if (!t.el) continue;
         const def = TOWER_TYPES[t.type], st = stat(t);
-        let target = null, best = Infinity;
-        for (const e of enemies) {
-          const d = Math.hypot(e.x - t.x, e.y - t.y);
-          if (d <= st.range && d < best) { best = d; target = e; }
-        }
+        // ten sam cel co w walce (utrzymany przez histerezę) — spójne obracanie/doskok
+        const target = (t.target && enemies.includes(t.target) &&
+          Math.hypot(t.target.x - t.x, t.target.y - t.y) <= st.range) ? t.target : null;
 
         if (target) {
           const rad = Math.atan2(target.y - t.y, target.x - t.x);
+          const best = Math.hypot(target.x - t.x, target.y - t.y);
           if (t.phase !== "attack") {
             t.phase = "attack"; t.el.src = def.attack;
             t.el.className = "tower-sprite sprite-attack";
@@ -394,7 +410,7 @@
       const def = TOWER_TYPES[type || selectedType];
       if (!def || money < def.cost) return false;
       const p = center(c, r);
-      const t = { c, r, x: p.x, y: p.y, cd: 0, type: type || selectedType, level: 1, ramp: 0, tsCd: 0 };
+      const t = { c, r, x: p.x, y: p.y, cd: 0, type: type || selectedType, level: 1, ramp: 0, tsCd: 0, target: null };
       towers.push(t);
       addTowerSprite(t);
       money -= def.cost;
@@ -438,11 +454,8 @@
       // wieże atakują (również podczas stopu czasu — biją w zamrożonych wrogów)
       for (const t of towers) {
         const def = TOWER_TYPES[t.type], st = stat(t);
-        let target = null, best = Infinity;
-        for (const e of enemies) {
-          const d = Math.hypot(e.x - t.x, e.y - t.y);
-          if (d <= st.range && d < best) { best = d; target = e; }
-        }
+        t.target = pickTarget(t, st.range);
+        const target = t.target;
 
         if (def.ramp) {
           // Jotaro: ciągłe obrażenia, które rosną im dłużej bez przerwy atakuje
