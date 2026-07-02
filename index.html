@@ -145,7 +145,7 @@
         ],
       },
     };
-    const TIMESTOP_DUR = 6;     // ile sekund wrogowie stoją w miejscu (ZA WARUDO)
+    const TIMESTOP_DUR = 5;     // 5 sekund zatrzymanego czasu (jak w anime)
     const TIMESTOP_CD = 60;     // odnowienie zdolności (1 minuta)
     let selectedType = "basic"; // typ do budowy (koszt 50 — zgodnie z testami)
     let selectedTower = null;   // postawiona wieża wybrana do ulepszenia / zdolności
@@ -470,9 +470,11 @@
       if (enemies.some((e) => e.leaked)) syncHud();
       enemies = enemies.filter((e) => e.alive && !e.leaked);
 
-      // wieże atakują (również podczas stopu czasu — biją w zamrożonych wrogów)
+      // wieże atakują. W zatrzymanym czasie rusza się TYLKO Jotaro (użytkownik Standa) —
+      // reszta wież zamarza razem ze światem.
       for (const t of towers) {
         const def = TOWER_TYPES[t.type], st = stat(t);
+        if (frozen && !def.ramp) continue;
         t.target = pickTarget(t, st.range);
         const target = t.target;
 
@@ -501,8 +503,8 @@
         }
       }
 
-      // pociski
-      for (const p of projectiles) {
+      // pociski (zamrożone w zatrzymanym czasie — lecą tylko poza ZA WARUDO)
+      if (!frozen) for (const p of projectiles) {
         if (!p.target || !p.target.alive) { p.dead = true; continue; }
         const dx = p.target.x - p.x, dy = p.target.y - p.y;
         const d = Math.hypot(dx, dy), step = p.speed * dt;
@@ -646,6 +648,7 @@
       level: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? t.level : 0; },
       targetId: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t && t.target ? t.target.id : null; },
       enemyKinds: () => enemies.map((e) => e.kind),          // do testów/debugowania
+      enemyHp: () => enemies.reduce((s, e) => s + e.hp, 0),  // suma HP wrogów (do testów)
       forceWave: (n) => { wave = n - 1; },                   // następny startWave() da falę n
       timeStop: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? activateTimeStop(t) : false; },
     };
