@@ -154,19 +154,19 @@
     const stat = (t) => TOWER_TYPES[t.type].levels[t.level - 1];  // aktywne staty wg poziomu
     const isMax = (t) => t.level >= TOWER_TYPES[t.type].levels.length;
 
-    // Cel wieży: najbliższy wróg w zasięgu, ale z HISTEREZĄ — trzyma obecny cel,
-    // dopóki żyje i jest w zasięgu, i nikt nie jest wyraźnie (>35%) bliżej. Dzięki temu
-    // Jotaro nie „przykleja się" do lidera znikającego za zakrętem ani nie miga między
-    // wrogami klatka po klatce, a jego DPS narasta na jednym celu.
+    // Cel wieży: TRZYMAJ obecny cel, dopóki żyje i jest w zasięgu — bez żadnego
+    // przeskakiwania na „bliższego". Dzięki temu wróg na zakręcie, który chwilowo
+    // wygląda na dalszego w linii prostej, nie zostaje porzucony na rzecz tego za nim.
+    // Nowy cel łapiemy dopiero, gdy obecny zginie lub wyjdzie z zasięgu → najbliższy.
     function pickTarget(t, range) {
-      let nearest = null, nd = Infinity;
+      if (t.target && enemies.includes(t.target) &&
+          Math.hypot(t.target.x - t.x, t.target.y - t.y) <= range) {
+        return t.target;                    // wciąż ważny → nie zmieniamy
+      }
+      let nearest = null, nd = Infinity;     // brak ważnego celu → złap najbliższego
       for (const e of enemies) {
         const d = Math.hypot(e.x - t.x, e.y - t.y);
         if (d <= range && d < nd) { nd = d; nearest = e; }
-      }
-      if (t.target && enemies.includes(t.target)) {
-        const dc = Math.hypot(t.target.x - t.x, t.target.y - t.y);
-        if (dc <= range && dc <= nd * 1.35) return t.target;
       }
       return nearest;
     }
@@ -390,9 +390,11 @@
       syncHud();
     }
 
+    let enemySeq = 0;
     function spawnEnemy() {
       const hp = 4 + (wave - 1) * 2; // fala 1 = 4 HP → ~2 s pod ostrzałem jednej wieży (2 dmg/s)
       enemies.push({
+        id: ++enemySeq,
         x: pathPx[0].x, y: pathPx[0].y, wp: 1,
         speed: 55 + wave * 4, hp: hp, maxHp: hp, alive: true,
       });
@@ -618,6 +620,7 @@
       giveMoney: (n) => { money += n; syncHud(); },   // pomocnik do testów/debugowania
       upgrade: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? upgradeTower(t) : false; },
       level: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? t.level : 0; },
+      targetId: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t && t.target ? t.target.id : null; },
       timeStop: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? activateTimeStop(t) : false; },
     };
 
