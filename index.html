@@ -42,6 +42,16 @@
     }
     button.btn.secondary { color:var(--brand-dark); background:#eef2ff; }
     button.btn:disabled { opacity:0.5; cursor:not-allowed; }
+    .tower-picker { display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:center; }
+    .tower-picker .tw {
+      display:flex; flex-direction:column; align-items:center; gap:0.1rem; min-width:5.4rem;
+      padding:0.45rem 0.6rem; border:2px solid var(--line); border-radius:0.7rem; background:#fff;
+      cursor:pointer; font-weight:700; font-size:0.8rem; color:var(--ink); line-height:1.15;
+    }
+    .tower-picker .tw .ico { font-size:1.35rem; }
+    .tower-picker .tw .cost { color:var(--muted); font-weight:600; }
+    .tower-picker .tw.sel { border-color:var(--brand); background:#eef2ff; box-shadow:0 6px 16px -10px rgba(79,70,229,0.7); }
+    .tower-picker .tw.poor { opacity:0.5; }
     .hint { color:var(--muted); font-size:0.85rem; text-align:center; max-width:40rem; }
     .banner {
       font-size:1.1rem; font-weight:800; text-align:center; min-height:1.5rem;
@@ -68,75 +78,134 @@
 
   <div class="banner" id="banner" data-testid="banner"></div>
 
+  <div class="tower-picker" id="towerPicker" data-testid="towerPicker"></div>
+
   <div class="controls">
     <button class="btn" id="start" data-testid="start">▶️ Start fali</button>
     <button class="btn secondary" id="reset" data-testid="reset">🔄 Nowa gra</button>
   </div>
-  <p class="hint">Kliknij / dotknij wolne pole (trawa), aby postawić wieżę (koszt 50 💰). Wieże strzelają do wrogów w zasięgu. Nie wpuść ich na koniec ścieżki!</p>
+  <p class="hint">Wybierz typ wieży powyżej, potem kliknij / dotknij wolne pole (trawa), aby ją postawić. Wieże atakują wrogów w zasięgu. Nie wpuść ich na koniec ścieżki!</p>
 
   <script>
   (function () {
     const COLS = 12, ROWS = 8, TILE = 64;
     const W = COLS * TILE, H = ROWS * TILE;
     const MAX_WAVES = 8;
-    const TOWER_COST = 50, TOWER_RANGE = 1.8 * TILE, TOWER_DMG = 1, TOWER_RATE = 2; // 1 dmg co 0,5 s
     const KILL_REWARD = 12;
+    const UP = "translate(-50%,-58%) rotate(0deg) scaleY(1)";
+
+    // ── Katalog wież. Nowy typ = jeden wpis + para zapętlonych gifów (idle/attack). ──
+    //  melee : doskok i obrót ku wrogowi, cios wręcz (pocisk niewidoczny).
+    //  ranged: stoi na kaflu, tylko odbicie lewo/prawo; leci widoczny pocisk (kula lub strzała).
+    const TOWER_TYPES = {
+      basic: {                                  // prosta wieża startowa
+        name: "Działko", icon: "🔫", cost: 50,
+        range: 1.8 * TILE, dmg: 2, rate: 0.8,   // wolno, ale przyzwoicie mocno (2 dmg co 1,25 s)
+        melee: false, projColor: "#2563eb", projSize: 5, projSpeed: 340,
+        idle: "basic_idle.gif", attack: "basic_attack.gif", idleH: "12%", attackH: "13%",
+      },
+      archer: {                                 // wieża dystansowa
+        name: "Łucznik", icon: "🏹", cost: 70,
+        range: 2.8 * TILE, dmg: 1, rate: 1.5,   // daleki zasięg, szybkie strzały
+        melee: false, arrow: true, projColor: "#a16207", projSpeed: 560,
+        idle: "archer_idle.gif", attack: "archer_attack.gif", idleH: "12%", attackH: "13%",
+      },
+      jotaro: {                                 // walka wręcz (dotychczasowa wieża)
+        name: "Jotaro", icon: "🥊", cost: 50,
+        range: 1.8 * TILE, dmg: 1, rate: 2,     // szybkie ciosy z bliska
+        melee: true, lunge: 0.5 * TILE, facingOffset: 0,
+        idle: "spawn.gif", attack: "tower.gif", idleH: "13%", attackH: "15%",
+      },
+    };
+    let selectedType = "basic";  // domyślnie wybrana wieża (koszt 50 — zgodnie z testami)
 
     const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
     const towersLayer = document.getElementById("towersLayer");
 
-    // źródła klatek Jotaro
-    const IDLE_SRC = "spawn.gif";       // animacja spoczynku — zapętlona
-    const ATTACK_SRC = "tower.gif";     // animacja ataku — zapętlona
-    const SPRITE_FACING_OFFSET_DEG = 0; // 0 = gif ataku patrzy w prawo
-    const UP = "translate(-50%,-58%) rotate(0deg) scaleY(1)";
-    const TOWER_LUNGE = 0.5 * TILE;     // o ile wieża „dosuwa się" do wroga podczas ataku (melee)
+    // ── pasek wyboru wież ──
+    function buildPicker() {
+      const wrap = document.getElementById("towerPicker");
+      wrap.innerHTML = "";
+      for (const [id, def] of Object.entries(TOWER_TYPES)) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "tw" + (id === selectedType ? " sel" : "");
+        b.dataset.type = id;
+        b.dataset.testid = "tower-" + id;
+        b.innerHTML = '<span class="ico">' + def.icon + '</span><span>' + def.name +
+                      '</span><span class="cost">💰 ' + def.cost + '</span>';
+        b.addEventListener("click", () => { selectedType = id; refreshPicker(); });
+        wrap.appendChild(b);
+      }
+    }
+    function refreshPicker() {
+      for (const b of document.querySelectorAll("#towerPicker .tw")) {
+        const def = TOWER_TYPES[b.dataset.type];
+        b.classList.toggle("sel", b.dataset.type === selectedType);
+        b.classList.toggle("poor", money < def.cost);
+      }
+    }
 
-    // dodaje sprite wieży: startuje zapętloną animacją spoczynku
+    // dodaje sprite wieży wg jej typu: startuje zapętloną animacją spoczynku
     function addTowerSprite(t) {
+      const def = TOWER_TYPES[t.type];
       const img = document.createElement("img");
-      img.alt = "Wieża";
+      img.alt = def.name;
       img.className = "tower-sprite sprite-idle";
       img.style.left = (t.x / W * 100) + "%";
       img.style.top = (t.y / H * 100) + "%";
+      img.style.height = def.idleH;
       img.style.transform = UP;
-      img.src = IDLE_SRC;
+      img.src = def.idle;
       towersLayer.appendChild(img);
       t.el = img; t.phase = "idle"; t.angle = 0; t.flip = 1;
     }
 
-    // stany: idle (zapętlone) ↔ atak (gdy wróg w zasięgu, obrót/mirror ku celowi)
+    // stany: idle (zapętlone) ↔ atak (gdy wróg w zasięgu). melee obraca się i doskakuje;
+    // ranged stoi na kaflu i tylko odbija się w lewo/prawo ku celowi.
     function updateTowerSprites() {
       for (const t of towers) {
         if (!t.el) continue;
+        const def = TOWER_TYPES[t.type];
         let target = null, best = Infinity;
         for (const e of enemies) {
           const d = Math.hypot(e.x - t.x, e.y - t.y);
-          if (d <= TOWER_RANGE && d < best) { best = d; target = e; }
+          if (d <= def.range && d < best) { best = d; target = e; }
         }
 
         if (target) {
           const rad = Math.atan2(target.y - t.y, target.x - t.x);
-          const deg = rad * 180 / Math.PI + SPRITE_FACING_OFFSET_DEG;
-          const flip = Math.cos(rad) < 0 ? -1 : 1; // wróg po lewej → odbicie w pionie
-          // doskok w stronę wroga, ale nie dalej niż do celu (cios kontaktowy)
-          const reach = Math.min(TOWER_LUNGE, best);
-          const lx = t.x + Math.cos(rad) * reach, ly = t.y + Math.sin(rad) * reach;
           if (t.phase !== "attack") {
-            t.phase = "attack"; t.el.src = ATTACK_SRC;
+            t.phase = "attack"; t.el.src = def.attack;
             t.el.className = "tower-sprite sprite-attack";
+            t.el.style.height = def.attackH;
             t.angle = null; // wymuś aktualizację pozycji/obrotu przy wejściu w atak
           }
-          if (t.angle === null || Math.abs(deg - t.angle) > 0.5 || flip !== t.flip) {
-            t.angle = deg; t.flip = flip;
-            t.el.style.left = (lx / W * 100) + "%";
-            t.el.style.top = (ly / H * 100) + "%";
-            t.el.style.transform = "translate(-50%,-58%) rotate(" + deg + "deg) scaleY(" + flip + ")";
+          if (def.melee) {
+            const deg = rad * 180 / Math.PI + def.facingOffset;
+            const flip = Math.cos(rad) < 0 ? -1 : 1; // wróg po lewej → odbicie w pionie (trik obrotu)
+            const reach = Math.min(def.lunge, best);
+            const lx = t.x + Math.cos(rad) * reach, ly = t.y + Math.sin(rad) * reach;
+            if (t.angle === null || Math.abs(deg - t.angle) > 0.5 || flip !== t.flip) {
+              t.angle = deg; t.flip = flip;
+              t.el.style.left = (lx / W * 100) + "%";
+              t.el.style.top = (ly / H * 100) + "%";
+              t.el.style.transform = "translate(-50%,-58%) rotate(" + deg + "deg) scaleY(" + flip + ")";
+            }
+          } else {
+            const flip = Math.cos(rad) < 0 ? -1 : 1; // wróg po lewej → odbicie poziome
+            if (t.angle === null || flip !== t.flip) {
+              t.angle = 0; t.flip = flip;
+              t.el.style.left = (t.x / W * 100) + "%";
+              t.el.style.top = (t.y / H * 100) + "%";
+              t.el.style.transform = "translate(-50%,-58%) scaleX(" + flip + ")";
+            }
           }
         } else if (t.phase !== "idle") {
-          t.phase = "idle"; t.el.src = IDLE_SRC;
+          t.phase = "idle"; t.el.src = def.idle;
           t.el.className = "tower-sprite sprite-idle";
+          t.el.style.height = def.idleH;
           t.angle = 0; t.flip = 1;
           t.el.style.left = (t.x / W * 100) + "%";  // powrót na środek kafla
           t.el.style.top = (t.y / H * 100) + "%";
@@ -191,6 +260,7 @@
       const names = { idle: "Gotowy", active: "Fala trwa…", win: "Wygrana!", lose: "Przegrana" };
       document.getElementById("phase").textContent = names[phase] || "—";
       document.getElementById("start").disabled = phase !== "idle";
+      refreshPicker();
     }
 
     function startWave() {
@@ -217,15 +287,16 @@
       return !towers.some((t) => t.c === c && t.r === r);
     }
 
-    function tryPlace(c, r) {
+    function tryPlace(c, r, type) {
       if (phase === "win" || phase === "lose") return false;
       if (!canBuild(c, r)) return false;
-      if (money < TOWER_COST) return false;
+      const def = TOWER_TYPES[type || selectedType];
+      if (!def || money < def.cost) return false;
       const p = center(c, r);
-      const t = { c, r, x: p.x, y: p.y, cd: 0 };
+      const t = { c, r, x: p.x, y: p.y, cd: 0, type: type || selectedType };
       towers.push(t);
       addTowerSprite(t);
-      money -= TOWER_COST;
+      money -= def.cost;
       syncHud();
       return true;
     }
@@ -258,16 +329,23 @@
       if (enemies.some((e) => e.leaked)) syncHud();
       enemies = enemies.filter((e) => e.alive && !e.leaked);
 
-      // wieże strzelają
+      // wieże atakują
       for (const t of towers) {
+        const def = TOWER_TYPES[t.type];
         t.cd -= dt;
         if (t.cd > 0) continue;
         let target = null, best = Infinity;
         for (const e of enemies) {
           const d = Math.hypot(e.x - t.x, e.y - t.y);
-          if (d <= TOWER_RANGE && d < best) { best = d; target = e; }
+          if (d <= def.range && d < best) { best = d; target = e; }
         }
-        if (target) { projectiles.push({ x: t.x, y: t.y, target, speed: 420 }); t.cd = 1 / TOWER_RATE; }
+        if (target) {
+          projectiles.push({
+            x: t.x, y: t.y, target, speed: def.projSpeed || 420, dmg: def.dmg,
+            visible: !def.melee, arrow: def.arrow, color: def.projColor, size: def.projSize || 4,
+          });
+          t.cd = 1 / def.rate;
+        }
       }
 
       // pociski
@@ -277,7 +355,7 @@
         const d = Math.hypot(dx, dy), step = p.speed * dt;
         if (step >= d) {
           p.x = p.target.x; p.y = p.target.y; p.dead = true;
-          p.target.hp -= TOWER_DMG;
+          p.target.hp -= p.dmg;
           if (p.target.hp <= 0 && p.target.alive) { p.target.alive = false; money += KILL_REWARD; }
         } else { p.x += (dx / d) * step; p.y += (dy / d) * step; }
       }
@@ -304,11 +382,12 @@
         ctx.strokeStyle = "rgba(0,0,0,0.05)";
         ctx.strokeRect(c * TILE, r * TILE, TILE, TILE);
       }
-      // podgląd budowy
-      if (hover && canBuild(hover.c, hover.r) && money >= TOWER_COST && phase !== "win" && phase !== "lose") {
+      // podgląd budowy (zasięg wybranego typu wieży)
+      const selDef = TOWER_TYPES[selectedType];
+      if (hover && canBuild(hover.c, hover.r) && money >= selDef.cost && phase !== "win" && phase !== "lose") {
         const p = center(hover.c, hover.r);
         ctx.fillStyle = "rgba(79,70,229,0.15)";
-        ctx.beginPath(); ctx.arc(p.x, p.y, TOWER_RANGE, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, selDef.range, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = "rgba(79,70,229,0.35)";
         ctx.fillRect(hover.c * TILE + 10, hover.r * TILE + 10, TILE - 20, TILE - 20);
       }
@@ -317,7 +396,21 @@
         ctx.fillStyle = "rgba(55,48,163,0.25)";
         ctx.beginPath(); ctx.ellipse(t.x, t.y + 12, 22, 9, 0, 0, Math.PI * 2); ctx.fill();
       }
-      // pociski: niewidoczne — atak wieży jest animacją wręcz (melee)
+      // pociski: melee niewidoczne; ranged rysujemy (kula działka / strzała łucznika)
+      for (const p of projectiles) {
+        if (!p.visible) continue;
+        if (p.arrow && p.target) {
+          const a = Math.atan2(p.target.y - p.y, p.target.x - p.x), len = 9;
+          ctx.strokeStyle = p.color || "#a16207"; ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(p.x - Math.cos(a) * len, p.y - Math.sin(a) * len);
+          ctx.lineTo(p.x + Math.cos(a) * len, p.y + Math.sin(a) * len);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = p.color || "#334155";
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.size || 4, 0, Math.PI * 2); ctx.fill();
+        }
+      }
       // wrogowie
       for (const e of enemies) {
         ctx.fillStyle = "#ef4444";
@@ -356,9 +449,11 @@
     // hook testowy / debug
     window.TD = {
       startWave, tryPlace, reset,
-      state: () => ({ money, lives, wave, phase, enemies: enemies.length, towers: towers.length, toSpawn }),
+      state: () => ({ money, lives, wave, phase, enemies: enemies.length, towers: towers.length, toSpawn, selected: selectedType }),
+      select: (type) => { if (TOWER_TYPES[type]) { selectedType = type; refreshPicker(); } },
     };
 
+    buildPicker();
     reset();
     requestAnimationFrame(loop);
   })();
