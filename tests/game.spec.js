@@ -120,3 +120,17 @@ test("ZA WARUDO może użyć tylko jeden Jotaro (pierwszy na L3)", async ({ page
   expect(await page.evaluate(() => window.TD.timeStop(0, 0))).toBe(true);
   expect((await state(page)).frozen).toBe(true);
 });
+
+test("fala 10 to miniboss, fala 20 to boss", async ({ page }) => {
+  await page.evaluate(() => { window.TD.forceWave(10); window.TD.startWave(); });
+  await expect.poll(() => page.evaluate(() => window.TD.enemyKinds().includes("mini")),
+    { timeout: 4000 }).toBe(true);
+
+  await page.evaluate(() => { window.TD.reset(); window.TD.forceWave(20); window.TD.startWave(); });
+  await expect.poll(() => page.evaluate(() => window.TD.enemyKinds().includes("boss")),
+    { timeout: 4000 }).toBe(true);
+});
+
+test("maksymalna liczba fal to 20", async ({ page }) => {
+  await expect(page.locator("#maxwave")).toHaveText("20");
+});

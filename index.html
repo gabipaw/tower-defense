@@ -103,7 +103,7 @@
   (function () {
     const COLS = 12, ROWS = 8, TILE = 64;
     const W = COLS * TILE, H = ROWS * TILE;
-    const MAX_WAVES = 8;
+    const MAX_WAVES = 20;
     const KILL_REWARD = 12;
     const UP = "translate(-50%,-58%) rotate(0deg) scaleY(1)";
 
@@ -133,15 +133,15 @@
           { dmg: 3, rate: 2.3, range: 3.6 * TILE, up: 0  },   // 6,9 dps
         ],
       },
-      jotaro: {                                 // walka wręcz z NARASTAJĄCYM DPS-em (Star Platinum)
-        name: "Jotaro", icon: "🥊", cost: 45,
+      jotaro: {                                 // NAJLEPSZA wieża: drogi premium z narastającym DPS-em (Star Platinum)
+        name: "Jotaro", icon: "🥊", cost: 90,
         melee: true, lunge: 0.5 * TILE, facingOffset: 0,
         idle: "spawn.gif", attack: "tower.gif", idleH: "13%", attackH: "15%",
-        ramp: true, rampMax: 3, rampTime: 3,    // im dłużej bije JEDEN cel, tym mocniej: do 3× po 3 s
+        ramp: true, rampMax: 4, rampTime: 3,    // im dłużej bije JEDEN cel, tym mocniej: do 4× po 3 s
         levels: [
-          { dps: 0.5, range: 1.9 * TILE, up: 55 },                // L1 (do 1,5 dps po rozpędzeniu)
-          { dps: 1.0, range: 2.0 * TILE, up: 90 },                // L2 (do 3,0 dps)
-          { dps: 2.0, range: 2.2 * TILE, up: 0, timeStop: true }, // L3: do 6,0 dps + ZA WARUDO
+          { dps: 0.5, range: 1.9 * TILE, up: 90  },               // L1 (do 2,0 dps po rozpędzeniu)
+          { dps: 1.0, range: 2.1 * TILE, up: 140 },               // L2 (do 4,0 dps)
+          { dps: 2.0, range: 2.3 * TILE, up: 0, timeStop: true }, // L3: do 8,0 dps (najwięcej w grze) + ZA WARUDO
         ],
       },
     };
@@ -361,12 +361,12 @@
     const key = (c, r) => c + "," + r;
     const inBounds = (c, r) => c >= 0 && c < COLS && r >= 0 && r < ROWS;
 
-    let money, lives, wave, phase, enemies, towers, projectiles, toSpawn, spawnTimer, hover;
+    let money, lives, wave, phase, enemies, towers, projectiles, toSpawn, spawnTimer, hover, bossPending;
 
     function reset() {
       money = 120; lives = 15; wave = 0; phase = "idle";
       enemies = []; towers = []; projectiles = []; toSpawn = 0; spawnTimer = 0; hover = null;
-      selectedTower = null; timeStop = 0; stopHolder = null;
+      bossPending = null; selectedTower = null; timeStop = 0; stopHolder = null;
       towersLayer.innerHTML = "";
       setBanner("");
       syncHud();
@@ -392,19 +392,25 @@
       if (phase !== "idle") return;
       wave += 1;
       toSpawn = 4 + wave * 2;
+      bossPending = wave === 20 ? "boss" : wave === 10 ? "mini" : null;  // fala 10 = miniboss, 20 = boss
       spawnTimer = 0;
       phase = "active";
-      setBanner("");
+      setBanner(bossPending === "boss" ? "💀 Fala 20 — BOSS!" :
+                bossPending === "mini" ? "⚠️ Fala 10 — MINIBOSS!" : "");
       syncHud();
     }
 
     let enemySeq = 0;
-    function spawnEnemy() {
-      const hp = 4 + (wave - 1) * 2; // fala 1 = 4 HP → ~2 s pod ostrzałem jednej wieży (2 dmg/s)
+    function spawnEnemy(kind) {
+      kind = kind || "normal";
+      const base = 4 + (wave - 1) * 2; // fala 1 = 4 HP → ~2 s pod ostrzałem jednej wieży (2 dmg/s)
+      let hp = base, speed = 55 + wave * 4, r = 14, color = "#ef4444", reward = KILL_REWARD, shape = "circle";
+      if (kind === "mini") { hp = base * 8;  speed *= 0.6; r = 22; color = "#111827"; reward = KILL_REWARD * 8;  shape = "square"; }
+      if (kind === "boss") { hp = base * 16; speed *= 0.5; r = 28; color = "#eab308"; reward = KILL_REWARD * 20; shape = "square"; }
       enemies.push({
-        id: ++enemySeq,
+        id: ++enemySeq, kind, shape, r, color, reward,
         x: pathPx[0].x, y: pathPx[0].y, wp: 1,
-        speed: 55 + wave * 4, hp: hp, maxHp: hp, alive: true,
+        speed, hp, maxHp: hp, alive: true,
       });
     }
 
@@ -437,10 +443,13 @@
       for (const t of towers) if (t.tsCd > 0) t.tsCd = Math.max(0, t.tsCd - dt);
       const frozen = timeStop > 0;   // ZA WARUDO: wrogowie stoją, wieże wciąż biją
 
-      // spawn (wstrzymany w czasie stopu)
-      if (!frozen && toSpawn > 0) {
+      // spawn (wstrzymany w czasie stopu); boss/miniboss wychodzi pierwszy
+      if (!frozen && (toSpawn > 0 || bossPending)) {
         spawnTimer -= dt;
-        if (spawnTimer <= 0) { spawnEnemy(); toSpawn -= 1; spawnTimer = 0.75; }
+        if (spawnTimer <= 0) {
+          if (bossPending) { spawnEnemy(bossPending); bossPending = null; spawnTimer = 0.9; }
+          else { spawnEnemy(); toSpawn -= 1; spawnTimer = 0.75; }
+        }
       }
 
       // wrogowie (nie ruszają się podczas stopu czasu)
@@ -473,7 +482,7 @@
             t.ramp = Math.min(def.rampTime, t.ramp + dt);
             const mult = 1 + (def.rampMax - 1) * (t.ramp / def.rampTime);
             target.hp -= st.dps * mult * dt;
-            if (target.hp <= 0 && target.alive) { target.alive = false; money += KILL_REWARD; }
+            if (target.hp <= 0 && target.alive) { target.alive = false; money += target.reward || KILL_REWARD; }
           } else {
             t.ramp = Math.max(0, t.ramp - dt * 2);  // stygnie szybciej, niż narasta
           }
@@ -500,7 +509,7 @@
         if (step >= d) {
           p.x = p.target.x; p.y = p.target.y; p.dead = true;
           p.target.hp -= p.dmg;
-          if (p.target.hp <= 0 && p.target.alive) { p.target.alive = false; money += KILL_REWARD; }
+          if (p.target.hp <= 0 && p.target.alive) { p.target.alive = false; money += p.target.reward || KILL_REWARD; }
         } else { p.x += (dx / d) * step; p.y += (dy / d) * step; }
       }
       projectiles = projectiles.filter((p) => !p.dead);
@@ -509,7 +518,7 @@
 
       // koniec fali / gry
       if (lives <= 0) { phase = "lose"; setBanner("Przegrana! Wrogowie przedarli się 💀", "lose"); syncHud(); return; }
-      if (toSpawn === 0 && enemies.length === 0) {
+      if (toSpawn === 0 && !bossPending && enemies.length === 0) {
         if (wave >= MAX_WAVES) { phase = "win"; setBanner("Wygrana! Obroniłeś wszystkie fale 🎉", "win"); }
         else { phase = "idle"; setBanner("Fala " + wave + " odparta! Kliknij „Start fali”."); }
         syncHud();
@@ -569,12 +578,19 @@
           ctx.beginPath(); ctx.arc(p.x, p.y, p.size || 4, 0, Math.PI * 2); ctx.fill();
         }
       }
-      // wrogowie
+      // wrogowie (zwykli = czerwone koła; miniboss = czarny kwadrat, boss = żółty kwadrat)
       for (const e of enemies) {
-        ctx.fillStyle = "#ef4444";
-        ctx.beginPath(); ctx.arc(e.x, e.y, 14, 0, Math.PI * 2); ctx.fill();
-        // pasek HP
-        const w = 30, h = 5, x = e.x - w / 2, y = e.y - 24;
+        const r = e.r || 14;
+        ctx.fillStyle = e.color || "#ef4444";
+        if (e.shape === "square") {
+          ctx.fillRect(e.x - r, e.y - r, r * 2, r * 2);
+          ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 2;
+          ctx.strokeRect(e.x - r, e.y - r, r * 2, r * 2);
+        } else {
+          ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, Math.PI * 2); ctx.fill();
+        }
+        // pasek HP (szerszy dla większych wrogów)
+        const w = Math.max(30, r * 2), h = 5, x = e.x - w / 2, y = e.y - r - 10;
         ctx.fillStyle = "#00000030"; ctx.fillRect(x, y, w, h);
         ctx.fillStyle = "#22c55e"; ctx.fillRect(x, y, w * Math.max(0, e.hp / e.maxHp), h);
       }
@@ -629,6 +645,8 @@
       upgrade: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? upgradeTower(t) : false; },
       level: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? t.level : 0; },
       targetId: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t && t.target ? t.target.id : null; },
+      enemyKinds: () => enemies.map((e) => e.kind),          // do testów/debugowania
+      forceWave: (n) => { wave = n - 1; },                   // następny startWave() da falę n
       timeStop: (c, r) => { const t = towers.find((x) => x.c === c && x.r === r); return t ? activateTimeStop(t) : false; },
     };
 
